@@ -6,6 +6,7 @@ from os import path
 from collections import defaultdict
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 from lightning import LightningDataModule
 from lightning.pytorch.utilities.types import EVAL_DATALOADERS, TRAIN_DATALOADERS
 
@@ -16,19 +17,23 @@ class ShapenetCoreDataset(LightningDataModule):
     verified category and alignment annotations. It covers 55 common object categories with about 51,300
     unique 3D models.
     """
-    def __init__(self, data_dir: str, dataset_type: str, classification: bool, augmentation: bool):
+    def __init__(self, data_dir: str, dataset_type: str, classification: bool, augmentation: bool,
+                 num_points: int = 2500):
         """
         Initialize a dataset instance
         @param data_dir: data/shapenetcore_subset
         @param dataset_type: choices=['train', 'val', 'test']
         @param classification: True - classification. False: segmentation.
         @param augmentation: True - apply data augmentation.
+        @param num_points: The number of points in each point cloud is different, a batch requires each sample
+        (point cloud) with the same length. Therefore, we need to resample each point cloud to the same length
         """
-        super.__init__()
+        super().__init__()
 
         self.data_dir = data_dir
         self.classification = classification
         self.augmentation = augmentation
+        self.num_points = num_points
         self.cat2id, self.id2cat = self.get_categories()
 
         self.json_file = os.path.join(data_dir, 'train_test_split', 'shuffled_{}_file_list.json'.format(dataset_type))
@@ -80,6 +85,13 @@ class ShapenetCoreDataset(LightningDataModule):
         pts_file = path.join(self.data_dir, cat_id, 'points', item + '.pts')
         points = np.loadtxt(pts_file, dtype=np.float32, delimiter=' ')
 
+        if points.shape[0] > self.num_points:
+            choice = np.random.choice(points.shape[0], self.num_points, replace=False)
+            points = points[choice, :]
+        elif points.shape[0] < self.num_points:
+            choice = np.random.choice(points.shape[0], self.num_points)
+            points = points[choice, :]
+
         if self.augmentation:
             theta = np.random.uniform(0, np.pi * 2)
             rotation_matrix = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
@@ -93,51 +105,97 @@ class ShapenetCoreDataset(LightningDataModule):
         # for segmentation:
         seg_file = path.join(self.data_dir, cat_id, 'points_label', item + '.seg')
         label = np.loadtxt(seg_file, dtype=np.int32, delimiter=' ')
+        label = label[choice]
         return torch.from_numpy(points), torch.from_numpy(label)
 
 
 class ShapenetCoreDataModule(LightningDataModule):
     """
-
+    ShapenetCore Data module
     """
-    def __init__(self, data_dir, batch_size=8, classification=True, augmentation=False, num_workers=4):
-        super.__init__()
+    def __init__(self, data_dir, batch_size=8, classification=True, augmentation=False, num_workers=4, num_points=2500):
+        super().__init__()
         self.data_dir = data_dir
         self.classification = classification
         self.augmentation = augmentation
         self.batch_size = batch_size
         self.num_workers = num_workers
 
-        self.train_dataset = ShapenetCoreDataset(data_dir, 'train', classification, augmentation)
-        self.val_dataset = ShapenetCoreDataset(data_dir, 'val', classification, False)
-        self.test_dataset = ShapenetCoreDataset(data_dir, 'test', classification, False)
+        self.train_dataset = ShapenetCoreDataset(data_dir, 'train',
+                                                 classification, augmentation, num_points=num_points)
+        self.val_dataset = ShapenetCoreDataset(data_dir, 'val',
+                                               classification, False, num_points=num_points)
+        self.test_dataset = ShapenetCoreDataset(data_dir, 'test',
+                                                classification, False, num_points=num_points)
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
-        data_loader = torch.utils.data.DataLoader(
+        data_loader = DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
             drop_last=True,
-            pin_memory=True)  # worker_init_fn=worker_init_fn)
+            pin_memory=False)
         return data_loader
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
-        pass
+        data_loader = DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=0,
+            drop_last=False,
+            pin_memory=False)
+        return data_loader
 
     def test_dataloader(self) -> EVAL_DATALOADERS:
-        pass
+        data_loader = DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=0,
+            drop_last=False,
+            pin_memory=False)
+        return data_loader
+
+
+def show_pcd(points, labels):
+    """
+    Visualize a point cloud sample
+    @param points:
+    @param labels:
+    @return:
+    """
+    import open3d as o3d
+
+    # Create an Open3D PointCloud object
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points)
+
+    # Map label values to colors
+    num_labels = int(np.max(labels))
+    label_colors = np.random.rand(num_labels + 1, 3)  # Generate random colors for each label
+    colors = label_colors[labels.astype(int)]  # Map labels to colors
+
+    # Assign colors to the point cloud based on the labels
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    # Visualize the point cloud
+    o3d.visualization.draw_geometries([pcd])
 
 
 if __name__ == '__main__':
     data_dir = 'data/shapenetcore_subset'
-    train_dataset = ShapenetCoreDataset(data_dir, 'train', augmentation=True)
-    n_files = len(train_dataset)
-    print(f"Number of files: {n_files}")
+    dm = ShapenetCoreDataModule(data_dir, batch_size=2, augmentation=True, classification=False)
+    train_loader = dm.train_dataloader()
 
-    idx = np.random.randint(0, n_files-1)
-    print(f"The {idx}-th sample is picked.")
-    points, label = train_dataset[idx]
-    print(points.shape)
-    print(label)
+    for i, batch in enumerate(train_loader):
+        if i > 2:
+            break
+        points, labels = batch
+        for j in range(points.shape[0]):
+            show_pcd(points[j].numpy(), labels[j].numpy())
+        print(f"Batch {i} points:", points.shape)
+        print(f"Batch {i} labels:", labels.shape)
+
     print('Done')
