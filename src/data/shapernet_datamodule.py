@@ -100,32 +100,27 @@ class ShapenetCoreDataModule(LightningDataModule):
     """
 
     """
-    def __init__(self, data_dir, batch_size=8, classification=True, augmentation=False):
+    def __init__(self, data_dir, batch_size=8, classification=True, augmentation=False, num_workers=4):
         super.__init__()
         self.data_dir = data_dir
         self.classification = classification
         self.augmentation = augmentation
         self.batch_size = batch_size
+        self.num_workers = num_workers
 
         self.train_dataset = ShapenetCoreDataset(data_dir, 'train', classification, augmentation)
         self.val_dataset = ShapenetCoreDataset(data_dir, 'val', classification, False)
         self.test_dataset = ShapenetCoreDataset(data_dir, 'test', classification, False)
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
-        data_loader = torch.utils.da
-
-
-
-        train_loader = torch.utils.data.DataLoader(
+        data_loader = torch.utils.data.DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
             drop_last=True,
-            pin_memory=True,
-            worker_init_fn=worker_init_fn)
-        return train_loader
-        pass
+            pin_memory=True)  # worker_init_fn=worker_init_fn)
+        return data_loader
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
         pass
