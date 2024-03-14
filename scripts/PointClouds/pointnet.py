@@ -191,11 +191,11 @@ class PointNetDenseCls(nn.Module):
 
 def feature_transform_regularizer(trans):
     d = trans.size()[1]
-    batchsize = trans.size()[0]
+    batchsize = trans.shape[0]
     I = torch.eye(d)[None, :, :]
     if trans.is_cuda:
         I = I.cuda()
-    loss = torch.mean(torch.norm(torch.bmm(trans, trans.transpose(2,1)) - I, dim=(1,2)))
+    loss = torch.mean(torch.norm(torch.bmm(trans, trans.transpose(2, 1)) - I, dim=(1, 2)))
     return loss
 
 
@@ -223,7 +223,9 @@ if __name__ == '__main__':
     cls = PointNetCls(k=5)
     out, _, _ = cls(sim_data)
     print('class', out.size())
+    print("Total number of parameters:", sum(p.numel() for p in cls.parameters() if p.requires_grad))
 
     seg = PointNetDenseCls(k=3)
     out, _, _ = seg(sim_data)
     print('seg', out.size())
+    print("Total number of parameters:", sum(p.numel() for p in seg.parameters() if p.requires_grad))
