@@ -135,7 +135,8 @@ class ShapenetCoreDataModule(LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             drop_last=True,
-            pin_memory=False)
+            pin_memory=True,
+            persistent_workers=True)
         return data_loader
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
@@ -143,9 +144,10 @@ class ShapenetCoreDataModule(LightningDataModule):
             self.val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=0,
+            num_workers=self.num_workers,
             drop_last=False,
-            pin_memory=False)
+            pin_memory=False,
+            persistent_workers=True)
         return data_loader
 
     def test_dataloader(self) -> EVAL_DATALOADERS:
@@ -153,9 +155,11 @@ class ShapenetCoreDataModule(LightningDataModule):
             self.test_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=0,
+            num_workers=self.num_workers,
             drop_last=False,
-            pin_memory=False)
+            pin_memory=False,
+            persistent_workers=True
+        )
         return data_loader
 
 
@@ -190,7 +194,7 @@ if __name__ == '__main__':
     train_loader = dm.train_dataloader()
 
     for i, batch in enumerate(train_loader):
-        if i > 2:
+        if i > 1:
             break
         points, labels = batch
         for j in range(points.shape[0]):

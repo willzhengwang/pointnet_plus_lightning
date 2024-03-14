@@ -61,8 +61,8 @@ class TNet(nn.Module):
         x = x.view(-1, self.k, self.k)  # (B, k, k)
 
         identity = torch.eye(self.k).view(1, self.k, self.k).repeat(batch_size, 1, 1)
-        # if x.is_cuda:
-        #     identity = identity.cuda()
+        if x.is_cuda:
+            identity = identity.cuda()
         return x + identity
 
 
@@ -131,8 +131,8 @@ def regularize_feat_transform(feat_trans):
     """
     k = feat_trans.shape[-1]
     I = torch.eye(k)
-    # if feat_trans.is_cuda:
-    #     I = I.cuda()
+    if feat_trans.is_cuda:
+        I = I.cuda()
     tmp = (torch.bmm(feat_trans, torch.transpose(feat_trans, 1, 2)) - I)
     reg_loss = torch.mean(torch.norm(tmp, dim=(1, 2)))
     return reg_loss
@@ -251,9 +251,8 @@ class PointNetClsModule(LightningModule):
         self.train_loss(loss)
         self.train_acc(preds, labels)
 
-        self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
-
+        self.log("train/loss", self.train_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/acc", self.train_acc, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
