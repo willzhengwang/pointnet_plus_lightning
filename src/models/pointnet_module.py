@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import torch
+from lightning.pytorch.utilities.types import OptimizerLRScheduler
 from torch import nn
 from torchmetrics.classification.accuracy import Accuracy
 from torchmetrics import MeanMetric, MaxMetric
@@ -173,14 +174,14 @@ class PointNetClsModule(LightningModule):
                  net: nn.Module,
                  optimizer: torch.optim.Optimizer,
                  scheduler: torch.optim.lr_scheduler,
-                 compling: bool = False
+                 compile: bool = False
                  ):
         """
         Init function of the LightningModule
         @param net: The model to train.
         @param optimizer: The optimizer to use for training.
         @param scheduler: The learning rate scheduler to use for training.
-        @param compling: True - compile model for faster training with pytorch 2.0.
+        @param compile: True - compile model for faster training with pytorch 2.0.
         """
         super().__init__()
 
@@ -294,6 +295,29 @@ class PointNetClsModule(LightningModule):
         self.test_acc(preds, labels)
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
+
+    def configure_optimizers(self) -> OptimizerLRScheduler:
+        """Choose what optimizers and learning-rate schedulers to use in your optimization.
+        Normally you'd need one. But in the case of GANs or similar you might have multiple.
+
+        Examples:
+            https://lightning.ai/docs/pytorch/latest/common/lightning_module.html#configure-optimizers
+
+        @return: A dict containing the configured optimizers and learning-rate schedulers to be used for training.
+        """
+        optimizer = self.hparams.optimizer(params=self.parameters())
+        if self.hparams.scheduler is not None:
+            scheduler = self.hparams.scheduler(optimizer=optimizer)
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "monitor": "val/loss",
+                    "interval": "epoch",
+                    "frequency": 1,
+                },
+            }
+        return {"optimizer": optimizer}
 
 
 if __name__ == '__main__':

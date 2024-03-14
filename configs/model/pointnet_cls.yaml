@@ -6,20 +6,21 @@ optimizer:
   lr: 0.001
   weight_decay: 0.0
 
+#scheduler:
+#  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+#  _partial_: true
+#  mode: min
+#  factor: 0.1
+#  patience: 2  # 10
 scheduler:
-  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  _target_: torch.optim.lr_scheduler.StepLR
   _partial_: true
-  mode: min
-  factor: 0.1
-  patience: 10
+  step_size: 50
+  gamma: 0.7
 
 net:
   _target_: src.models.pointnet_module.PointNetCls
-  input_size: 784
-  lin1_size: 64
-  lin2_size: 128
-  lin3_size: 64
-  output_size: 10
+  num_classes: 16
 
 # compile model for faster training with pytorch 2.0
 compile: false

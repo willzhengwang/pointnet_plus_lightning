@@ -100,13 +100,13 @@ class ShapenetCoreDataset(LightningDataModule):
 
         # for classification
         if self.classification:
-            label = np.array([self.id2cat[cat_id][1]], dtype=np.int32)
-            return torch.from_numpy(points), torch.from_numpy(label)
+            label = np.array([self.id2cat[cat_id][1]], dtype=np.int64)
+            return torch.from_numpy(points), torch.from_numpy(label.squeeze())
         # for segmentation:
         seg_file = path.join(self.data_dir, cat_id, 'points_label', item + '.seg')
-        label = np.loadtxt(seg_file, dtype=np.int32, delimiter=' ')
+        label = np.loadtxt(seg_file, dtype=np.int64, delimiter=' ')
         label = label[choice]
-        return torch.from_numpy(points), torch.from_numpy(label)
+        return torch.from_numpy(points), torch.from_numpy(label.squeeze())
 
 
 class ShapenetCoreDataModule(LightningDataModule):
