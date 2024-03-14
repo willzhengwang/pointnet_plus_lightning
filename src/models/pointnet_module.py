@@ -1,9 +1,8 @@
 #!/usr/bin/env python
-from typing import Any
-
 import torch
-from lightning.pytorch.utilities.types import STEP_OUTPUT
 from torch import nn
+from torchmetrics.classification.accuracy import Accuracy
+from torchmetrics import MeanMetric, MaxMetric
 from lightning import LightningModule
 
 
@@ -36,7 +35,7 @@ class TNet(nn.Module):
         # max(x, 2) + view(-1, 1024)
         self.fc1 = nn.Sequential(
             nn.Linear(1024, 512, bias=False),
-            nn.BatchNorm1d(1024),
+            nn.BatchNorm1d(512),
             nn.ReLU()
         )
         self.fc2 = nn.Sequential(
@@ -61,8 +60,8 @@ class TNet(nn.Module):
         x = x.view(-1, self.k, self.k)  # (B, k, k)
 
         identity = torch.eye(self.k).view(1, self.k, self.k).repeat(batch_size, 1, 1)
-        if x.cuda():
-            identity = identity.cuda()
+        # if x.is_cuda:
+        #     identity = identity.cuda()
         return x + identity
 
 
@@ -131,8 +130,8 @@ def regularize_feat_transform(feat_trans):
     """
     k = feat_trans.shape[-1]
     I = torch.eye(k)
-    if feat_trans.cuda():
-        I = I.cuda()
+    # if feat_trans.is_cuda:
+    #     I = I.cuda()
     tmp = (torch.bmm(feat_trans, torch.transpose(feat_trans, 1, 2)) - I)
     reg_loss = torch.mean(torch.norm(tmp, dim=(1, 2)))
     return reg_loss
@@ -144,6 +143,7 @@ class PointNetCls(nn.Module):
     """
     def __init__(self, num_classes, feature_transform=False):
         super().__init__()
+        self.num_classes = num_classes
 
         self.feat_net = FeatureNet(classification=True, feature_transform=feature_transform)
         self.mlp = nn.Sequential(
@@ -151,18 +151,18 @@ class PointNetCls(nn.Module):
             nn.BatchNorm1d(512),
             nn.ReLU(),
 
-            nn.Linear(512, 256, kernel_size=1, bias=False),
+            nn.Linear(512, 256, bias=False),
             nn.Dropout(p=0.3),
             nn.BatchNorm1d(256),
             nn.ReLU(),
 
-            nn.Linear(256, num_classes, kernel_size=1),
+            nn.Linear(256, num_classes),
         )
 
     def forward(self, x):
         x, tran3, trans64 = self.feat_net(x)
-        x = self.mlp(x)  # (batch_size, num_classes)
-        return nn.functional.log_softmax(x), tran3, trans64
+        logits = self.mlp(x)  # (batch_size, num_classes)
+        return logits, tran3, trans64
 
 
 class PointNetClsModule(LightningModule):
@@ -182,22 +182,126 @@ class PointNetClsModule(LightningModule):
         @param scheduler: The learning rate scheduler to use for training.
         @param compling: True - compile model for faster training with pytorch 2.0.
         """
+        super().__init__()
+
         # this line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
         self.save_hyperparameters(logger=False)
 
         self.net = net
 
-        self.loss = nn.functional.nll_loss()
+        self.criterion = nn.CrossEntropyLoss()
+
+        # metric objects for calculating and averaging accuracy across batches
+        self.train_acc = Accuracy(task="multiclass", num_classes=net.num_classes)
+        self.val_acc = Accuracy(task="multiclass", num_classes=net.num_classes)
+        self.test_acc = Accuracy(task="multiclass", num_classes=net.num_classes)
+
+        # for averaging loss across batches
+        self.train_loss = MeanMetric()
+        self.val_loss = MeanMetric()
+        self.test_loss = MeanMetric()
+
+        # for tracking best so far validation accuracy
+        self.val_acc_best = MaxMetric()
+
+    def setup(self, stage: str) -> None:
+        """Lightning hook that is called at the beginning of fit (train + validate), validate,
+        test, or predict.
+
+        This is a good hook when you need to build models dynamically or adjust something about
+        them. This hook is called on every process when using DDP.
+
+        @param stage: Either `"fit"`, `"validate"`, `"test"`, or `"predict"`.
+        """
+        if self.hparams.compile and stage == "fit":
+            self.net = torch.compile(self.net)
+
+    def on_train_start(self) -> None:
+        """Lightning hook that is called when training begins."""
+        # by default lightning executes validation step sanity checks before training starts,
+        # so it's worth to make sure validation metrics don't store results from these checks
+        self.val_loss.reset()
+        self.val_acc.reset()
+        self.val_acc_best.reset()
 
     def forward(self, x):
         return self.net(x)
 
     def training_step(self, batch, batch_idx):
+        """
+        Perform a single training step on a batch of data from the training set.
+
+        @param batch: A batch of data (a tuple) containing the input tensor of images and target labels.
+        @param batch_idx: The index of the current batch.
+        @return: A tensor of losses between model predictions and targets.
+        """
         points, labels = batch
         points = torch.transpose(points, 1, 2)  # (batch_size, 3, num_point)
 
-        preds, tran3, trans64 = self.forward(points)  # preds are log_softmax
-        total_loss = self.loss(preds, labels)
+        logits, tran3, trans64 = self.forward(points)  # preds are logits
+
+        loss = self.criterion(logits, labels)
         if trans64 is not None:
-            total_loss += regularize_feat_transform(trans64)
+            loss += regularize_feat_transform(trans64)
+
+        preds = torch.argmax(logits, dim=1)  # (batch_size, num_classes)
+        # update and log metrics
+        self.train_loss(loss)
+        self.train_acc(preds, labels)
+
+        self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        """
+        Perform a single validation step on a batch of data from the validation set.
+        @param batch: A batch of data (a tuple) containing the input tensor of images and target labels.
+        @param batch_idx: The index of the current batch.
+        """
+        points, labels = batch
+        points = torch.transpose(points, 1, 2)  # (batch_size, 3, num_point)
+
+        logits, tran3, trans64 = self.forward(points)  # preds are logits
+        loss = self.criterion(logits, labels)
+        preds = torch.argmax(logits, dim=1)  # (batch_size, num_classes)
+
+        # update and log metrics
+        self.val_loss(loss)
+        self.val_acc(preds, labels)
+        self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
+
+    def test_step(self, batch, batch_idx):
+        """
+        Perform a single test step on a batch of data from the test set.
+
+        @param batch: A batch of data (a tuple) containing the input tensor of images and target
+            labels.
+        @param batch_idx: The index of the current batch.
+        """
+        points, labels = batch
+        points = torch.transpose(points, 1, 2)  # (batch_size, 3, num_point)
+
+        logits, _, _ = self.forward(points)
+        loss = self.criterion(logits, labels)
+        preds = torch.argmax(logits, dim=1)  # (batch_size, num_classes)
+
+        # update and log metrics
+        self.test_loss(loss)
+        self.test_acc(preds, labels)
+        self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
+
+
+if __name__ == '__main__':
+    batch_size, num_classes = 4, 5
+    sim_data = torch.rand(batch_size, 3, 2000)
+
+    pointfeat = PointNetCls(num_classes)
+    out, _, _ = pointfeat(sim_data)
+    print(f"Expect out shape: {batch_size} * {num_classes}")
+    print('Point feat', out.shape)
+    print("Total number of parameters:", sum(p.numel() for p in pointfeat.parameters() if p.requires_grad))
