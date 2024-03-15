@@ -7,7 +7,7 @@ defaults:
   - data: shapenet_cls # mnist  #
   - model: pointnet_cls # mnist  #
   - callbacks: default
-  - logger: null # set logger here or use command line (e.g. `python train.py logger=tensorboard`)
+  - logger: tensorboard  # null # set logger here or use command line (e.g. `python train.py logger=tensorboard`)
   - trainer: default
   - paths: default
   - extras: default
