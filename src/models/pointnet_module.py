@@ -9,7 +9,10 @@ from lightning import LightningModule
 
 class TNet(nn.Module):
     """
-    T-Net for transformation in the PointNet paper.
+    T-Net for (input / feature) transformation in the PointNet paper.
+    Structure: mlp --> maxpool --> mlp.
+    TNet is data-dependent , so it's size is (batch_size, dim, dim).
+    TNet provides a new viewpoint of a pcd of an object.
     """
 
     def __init__(self, k: int):
@@ -68,12 +71,13 @@ class TNet(nn.Module):
 
 class FeatureNet(nn.Module):
     """
-    Extract local and global features
+    Extract point embeddings and global features.
+    Structure: input TNet --> optional feature TNet --> MLP --> max pool
     """
     def __init__(self, classification=True, feature_transform=False):
         """
         @param classification: True - for classification. Extract global feature only.
-                               False - for segmentation. Cat([global_feature, local_feature]
+                               False - for segmentation. Cat([point_embedding, global_feature]
         @param feature_transform:
         """
         super().__init__()
@@ -103,7 +107,7 @@ class FeatureNet(nn.Module):
         x = torch.bmm(x, trans3)  # (batch_size, num_pts, 3)
         x = torch.transpose(x, 1, 2)  # (batch_size, 3, num_pts)
         x = self.conv1(x)  # (batch_size, 64, num_pts)
-        local_feat = x
+        point_feat = x
 
         if self.feature_transform:
             trans64 = self.tnet64(x)
@@ -120,7 +124,7 @@ class FeatureNet(nn.Module):
         if self.classification:
             return global_feat, trans3, trans64
         # segmentation
-        return torch.cat([local_feat, global_feat], dim=1), trans3, trans64
+        return torch.cat([point_feat, global_feat], dim=1), trans3, trans64
 
 
 def regularize_feat_transform(feat_trans):
