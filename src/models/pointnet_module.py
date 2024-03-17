@@ -74,8 +74,9 @@ class FeatureNet(nn.Module):
     Extract point embeddings and global features.
     Structure: input TNet --> optional feature TNet --> MLP --> max pool
     """
-    def __init__(self, classification=True, feature_transform=False):
+    def __init__(self, in_channels=3, classification=True, feature_transform=False):
         """
+        @param in_channels: input data channels. Default is 3 for (x, y, z) coordinates.
         @param classification: True - for classification. Extract global feature only.
                                False - for segmentation. Cat([point_embedding, global_feature]
         @param feature_transform:
@@ -83,9 +84,9 @@ class FeatureNet(nn.Module):
         super().__init__()
         self.classification = classification
         self.feature_transform = feature_transform
-        self.tnet3 = TNet(3)
+        self.tnet_in = TNet(in_channels)
         self.conv1 = nn.Sequential(
-            nn.Conv1d(3, 64, kernel_size=1, bias=False),
+            nn.Conv1d(in_channels, 64, kernel_size=1, bias=False),
             nn.BatchNorm1d(64),
             nn.ReLU()
         )
@@ -101,30 +102,30 @@ class FeatureNet(nn.Module):
         )
 
     def forward(self, x):
-        # x: (batch_size, 3, num_pts)
-        trans3 = self.tnet3(x)  # (batch_size, 3, 3)
-        x = torch.transpose(x, 1, 2)  # (batch_size, num_pts, 3)
-        x = torch.bmm(x, trans3)  # (batch_size, num_pts, 3)
-        x = torch.transpose(x, 1, 2)  # (batch_size, 3, num_pts)
+        # x: (batch_size, in_channels, num_pts)
+        trans_in = self.tnet_in(x)  # (batch_size, in_channels, in_channels)
+        x = torch.transpose(x, 1, 2)  # (batch_size, num_pts, in_channels)
+        x = torch.bmm(x, trans_in)  # (batch_size, num_pts, in_channels)
+        x = torch.transpose(x, 1, 2)  # (batch_size, in_channels, num_pts)
         x = self.conv1(x)  # (batch_size, 64, num_pts)
         point_feat = x
 
         if self.feature_transform:
-            trans64 = self.tnet64(x)
+            trans_feat = self.tnet64(x)
             x = torch.transpose(x, 1, 2)
-            x = torch.bmm(x, trans64)  # (batch_size, num_pts, 64)
+            x = torch.bmm(x, trans_feat)  # (batch_size, num_pts, 64)
             x = torch.transpose(x, 1, 2)  # (batch_size, 64, num_pts)
         else:
-            trans64 = None
+            trans_feat = None
 
         x = self.mlp(x)  # (batch_size, 1024, num_pts)
         x = torch.max(x, 2, keepdim=True)[0]  # (batch_size, 1024, 1)
         global_feat = x.view(-1, 1024)  # (batch_size, 1024)
 
         if self.classification:
-            return global_feat, trans3, trans64
+            return global_feat, trans_in, trans_feat
         # segmentation
-        return torch.cat([point_feat, global_feat], dim=1), trans3, trans64
+        return torch.cat([point_feat, global_feat], dim=1), trans_in, trans_feat
 
 
 def regularize_feat_transform(feat_trans):
@@ -146,11 +147,11 @@ class PointNetCls(nn.Module):
     """
     PointNet for classification
     """
-    def __init__(self, num_classes, feature_transform=False):
+    def __init__(self, num_classes, in_channels=3, feature_transform=False):
         super().__init__()
         self.num_classes = num_classes
 
-        self.feat_net = FeatureNet(classification=True, feature_transform=feature_transform)
+        self.feat_net = FeatureNet(in_channels=in_channels, classification=True, feature_transform=feature_transform)
         self.mlp = nn.Sequential(
             nn.Linear(1024, 512, bias=False),
             nn.BatchNorm1d(512),
@@ -165,9 +166,9 @@ class PointNetCls(nn.Module):
         )
 
     def forward(self, x):
-        x, tran3, trans64 = self.feat_net(x)
+        x, trans_in, trans_feat = self.feat_net(x)
         logits = self.mlp(x)  # (batch_size, num_classes)
-        return logits, tran3, trans64
+        return logits, trans_in, trans_feat
 
 
 class PointNetClsModule(LightningModule):
@@ -244,11 +245,11 @@ class PointNetClsModule(LightningModule):
         points, labels = batch
         points = torch.transpose(points, 1, 2)  # (batch_size, 3, num_point)
 
-        logits, tran3, trans64 = self.forward(points)  # preds are logits
+        logits, trans_in, trans_feat = self.forward(points)  # preds are logits
 
         loss = self.criterion(logits, labels)
-        if trans64 is not None:
-            loss += regularize_feat_transform(trans64)
+        if trans_feat is not None:
+            loss += regularize_feat_transform(trans_feat)
 
         preds = torch.argmax(logits, dim=1)  # (batch_size, num_classes)
         # update and log metrics
@@ -268,7 +269,7 @@ class PointNetClsModule(LightningModule):
         points, labels = batch
         points = torch.transpose(points, 1, 2)  # (batch_size, 3, num_point)
 
-        logits, tran3, trans64 = self.forward(points)  # preds are logits
+        logits, trans_in, trans_feat = self.forward(points)  # preds are logits
         loss = self.criterion(logits, labels)
         preds = torch.argmax(logits, dim=1)  # (batch_size, num_classes)
 
@@ -325,9 +326,9 @@ class PointNetClsModule(LightningModule):
 
 if __name__ == '__main__':
     batch_size, num_classes = 4, 5
-    sim_data = torch.rand(batch_size, 3, 2000)
+    sim_data = torch.rand(batch_size, 6, 2000)
 
-    pointfeat = PointNetCls(num_classes)
+    pointfeat = PointNetCls(num_classes, in_channels=6)
     out, _, _ = pointfeat(sim_data)
     print(f"Expect out shape: {batch_size} * {num_classes}")
     print('Point feat', out.shape)
