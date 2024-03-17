@@ -84,7 +84,13 @@ class FeatureNet(nn.Module):
         super().__init__()
         self.classification = classification
         self.feature_transform = feature_transform
-        self.tnet_in = TNet(in_channels)
+        self.in_channels = in_channels
+        if in_channels <= 3:
+            self.tnet_in = TNet(in_channels)
+        else:
+            # (x, y, z) + feature (like nx, ny, nz or intensity, R, G, B, ...)
+            self.tnet_in = TNet(3)
+
         self.conv1 = nn.Sequential(
             nn.Conv1d(in_channels, 64, kernel_size=1, bias=False),
             nn.BatchNorm1d(64),
@@ -103,10 +109,15 @@ class FeatureNet(nn.Module):
 
     def forward(self, x):
         # x: (batch_size, in_channels, num_pts)
+        if self.in_channels > 3:
+            x, feature = x.split(3, dim=1)
         trans_in = self.tnet_in(x)  # (batch_size, in_channels, in_channels)
+
         x = torch.transpose(x, 1, 2)  # (batch_size, num_pts, in_channels)
         x = torch.bmm(x, trans_in)  # (batch_size, num_pts, in_channels)
         x = torch.transpose(x, 1, 2)  # (batch_size, in_channels, num_pts)
+        if self.in_channels > 3:
+            x = torch.cat([x, feature], dim=1)
         x = self.conv1(x)  # (batch_size, 64, num_pts)
         point_feat = x
 
