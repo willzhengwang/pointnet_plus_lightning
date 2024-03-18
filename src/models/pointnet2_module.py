@@ -60,11 +60,36 @@ def index_points(points: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
     return new_points
 
 
-def farthest_point_sample(xyz, num_pts):
+def farthest_point_sample(xyz: torch.Tensor, num_samples: int) -> torch.Tensor:
     """
     Farthest Point Sampling (FPS)
     @param xyz:
-    @param num_pts:
+    @param num_samples: the number of sampled points
     @return:
+        sample_inds: (batch_size, num_samples) of sample point indices
     """
-    pass
+    device = xyz.device
+    B, N, C = xyz.shape  # batch_size, num_points, num_channels
+    sample_inds = torch.zeros(B, num_samples, dtype=torch.long).to(device)
+
+    # Initialize the distances between points to the selected sample points with max inf.
+    distance = torch.zeros(B, N).to(device) + float('inf')
+
+    # For each point cloud, randomly select a point as the farthest point
+    farthest = torch.randint(0, N, (B,), dtype=torch.long).to(device)
+    batch_indices = torch.arange(B, dtype=torch.long).to(device)
+
+    for i in range(num_samples):
+        # set the new centroid as the last farthest point
+        sample_inds[:, i] = farthest
+        centroid = xyz[batch_indices, farthest, :].view(B, 1, C)
+
+        # calculate the distances between the points with the centroid (i.e. the newly selected sample)
+        dist = torch.sum((xyz - centroid) ** 2, -1)
+
+        # Keep updating the distance array, which enables the selection of farthest point to all existing centroids.
+        mask = dist < distance
+        distance[mask] = dist[mask]
+
+        farthest = torch.max(distance, -1)[1]
+    return sample_inds
