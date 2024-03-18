@@ -1,0 +1,43 @@
+#!/usr/bin/env python
+import torch
+import numpy as np
+import pytest
+from src.models.pointnet2_module import pc_normalize, square_distance, index_points
+
+
+def test_pc_normalize():
+    np.random.seed(42)
+    pc = np.random.randn(50, 3)
+    pc[:, 0] * 2 + 3.0
+    pc[:, 1] * (-2) - 1.0
+
+    normalized_pc = pc_normalize(pc)
+    radius = np.max(np.linalg.norm(normalized_pc, axis=1))
+    assert radius == pytest.approx(1.0, abs=1e-8)
+
+
+def test_square_distance():
+    # case 1: test the output size
+    src = torch.randn([8, 50, 3])
+    dst = torch.randn([8, 60, 3])
+    dist = square_distance(src, dst)
+    assert dist.shape == torch.Size([8, 50, 60])
+
+    # case 2: check the results
+    src = torch.ones([8, 10, 3])
+    src[:, :, 1] = -1
+    dst = torch.zeros([8, 15, 3])
+    dist = square_distance(src, dst)
+    assert torch.all(torch.eq(dist, 3.0))
+
+
+def test_index_points():
+    batch_size, num_pts = 4, 10
+    points = torch.zeros([batch_size, num_pts, 3])
+    for i in range(num_pts):
+        points[:, i, :] = i
+    inds = torch.tensor([[0, 1], [0, 5], [6, 7], [9, 8]], dtype=torch.long)
+    indexed_points = index_points(points, inds)
+    for i in range(batch_size):
+        expect = inds[i].view(len(inds[i]), -1).repeat(1, 3).float()
+        assert torch.eq(indexed_points[i], expect).all()
