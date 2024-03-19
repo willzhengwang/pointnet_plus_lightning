@@ -2,7 +2,8 @@
 import torch
 import numpy as np
 import pytest
-from src.models.pointnet2_module import pc_normalize, square_distance, index_points, farthest_point_sample
+from src.models.pointnet2_module import (pc_normalize, square_distance, index_points, farthest_point_sample,
+                                         query_ball)
 
 
 def test_pc_normalize():
@@ -43,13 +44,16 @@ def test_index_points():
         assert torch.eq(indexed_points[i], expect).all()
 
 
-def test_farthest_point_sample():
+def test_fps_and_ball_query():
     torch.manual_seed(0)
-    num_channels = 2
-    batch_xyz = torch.randn([1, 100, num_channels], dtype=torch.float32) * 0.05
+    batch_size, num_centroids, num_channels = 2, 3, 3
+    batch_xyz = torch.randn([batch_size, 100, num_channels], dtype=torch.float32) * 0.05
     batch_xyz[:, 50:, :] += 10.0
-    inds = farthest_point_sample(batch_xyz, 2)
+    centroid_inds = farthest_point_sample(batch_xyz, num_centroids)
 
-    centroids = torch.gather(batch_xyz, 1, inds.unsqueeze(-1).repeat([1, 1, num_channels]))
+    centroids = torch.gather(batch_xyz, 1, centroid_inds.unsqueeze(-1).repeat([1, 1, num_channels]))
     squared_dis = torch.norm(centroids[0, 0, :] - centroids[0, 1, :]) ** 2
-    assert pytest.approx(squared_dis.item(), abs=20) == 200.0
+    assert pytest.approx(squared_dis.item(), abs=20) == 300.0
+
+    group_inds = query_ball(0.1, 10, batch_xyz, centroids)
+    assert group_inds.shape == torch.Size([batch_size, num_centroids, 10])

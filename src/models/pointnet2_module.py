@@ -60,29 +60,29 @@ def index_points(points: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
     return new_points
 
 
-def farthest_point_sample(xyz: torch.Tensor, num_samples: int) -> torch.Tensor:
+def farthest_point_sample(xyz: torch.Tensor, num_centroids: int) -> torch.Tensor:
     """
-    Farthest Point Sampling (FPS)
-    @param xyz:
-    @param num_samples: the number of sampled points
+    Farthest Point Sampling (FPS) for selecting a number of centroids from the input point clouds.
+    @param xyz: (batch_size, num_points, num_channels=3) - a batch of point clouds
+    @param num_centroids: the number of sampled points
     @return:
-        sample_inds: (batch_size, num_samples) of sample point indices
+        centroid_inds: (batch_size, num_samples) of sample point indices
     """
     device = xyz.device
     B, N, C = xyz.shape  # batch_size, num_points, num_channels
-    sample_inds = torch.zeros(B, num_samples, dtype=torch.long).to(device)
+    centroid_inds = torch.zeros(B, num_centroids, dtype=torch.long).to(device)
 
     # Initialize the distances between points to the selected sample points with max inf.
     distance = torch.zeros(B, N).to(device) + float('inf')
 
     # For each point cloud, randomly select a point as the farthest point
     farthest = torch.randint(0, N, (B,), dtype=torch.long).to(device)
-    batch_indices = torch.arange(B, dtype=torch.long).to(device)
+    batch_inds = torch.arange(B, dtype=torch.long).to(device)
 
-    for i in range(num_samples):
+    for i in range(num_centroids):
         # set the new centroid as the last farthest point
-        sample_inds[:, i] = farthest
-        centroid = xyz[batch_indices, farthest, :].view(B, 1, C)
+        centroid_inds[:, i] = farthest
+        centroid = xyz[batch_inds, farthest, :].view(B, 1, C)
 
         # calculate the distances between the points with the centroid (i.e. the newly selected sample)
         dist = torch.sum((xyz - centroid) ** 2, -1)
@@ -92,4 +92,33 @@ def farthest_point_sample(xyz: torch.Tensor, num_samples: int) -> torch.Tensor:
         distance[mask] = dist[mask]
 
         farthest = torch.max(distance, -1)[1]
-    return sample_inds
+    return centroid_inds
+
+
+def query_ball(radius, num_samples, xyz, query_xyz):
+    """
+    Find sample points within a radius for each query point (centroid).
+    @param radius: local region radius
+    @param num_samples: max sample number in local region
+    @param xyz: (batch_size, num_points, num_channels=3) - a batch of point clouds
+    @param query_xyz: query points, [B, S, 3]
+    @return:
+        group_inds: (batch_size, num_centroids, num_samples) the centroid index of each point
+    """
+    device = xyz.device
+    B, N, C = xyz.shape
+    _, S, _ = query_xyz.shape
+    group_inds = torch.arange(N, dtype=torch.long).to(device).view(1, 1, N).repeat([B, S, 1])
+
+    # calculate the squared distance for every pair of points between two point clouds.
+    sqr_dists = square_distance(query_xyz, xyz)  # (batch_size, S, N)
+    group_inds[sqr_dists > radius ** 2] = N
+    group_inds = group_inds.sort(dim=-1)[0][:, :, :num_samples]
+
+    # if the number of sample points within the radius is < num_samples, fill the remaining with the first point
+    group_first = group_inds[:, :, 0].view(B, S, 1).repeat([1, 1, num_samples])
+    mask = group_inds == N
+    group_inds[mask] = group_first[mask]
+    return group_inds
+
+
