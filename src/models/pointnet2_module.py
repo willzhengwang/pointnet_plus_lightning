@@ -203,8 +203,8 @@ class PointNetSetAbstraction(nn.Module):
     PointNet layer: for local pattern learning.
     """
 
-    def __init__(self, num_centroids: int, radius: float, num_samples: int, in_channels: int,
-                 mlp_channels: List[int], group_all: bool):
+    def __init__(self, num_centroids: Optional[int], radius: Optional[float], num_samples: Optional[int],
+                 in_channels: int, mlp_channels: List[int], group_all: bool):
         super().__init__()
         self.num_centroids = num_centroids
         self.radius = radius
@@ -265,18 +265,21 @@ class PointNetSetAbstractionMSG(nn.Module):
         self.num_centroids = num_centroids
         self.radius_list = radius_list
         self.num_samples_list = num_samples_list
+        self.mlp_channels_list = mlp_channels_list
         self.mlp_blocks = nn.ModuleList()
-        for mlp_channels in mlp_channels_list:
+        for i, mlp_channels in enumerate(mlp_channels_list):
             mlp = nn.ModuleList()
+            # In different scales, the first input channels are the same
+            last_channels = in_channels
             for out_channels in mlp_channels:
                 mlp.append(
                     nn.Sequential(
-                        nn.Conv2d(in_channels, out_channels, 1),
+                        nn.Conv2d(last_channels, out_channels, 1),
                         nn.BatchNorm2d(out_channels),
                         nn.ReLU(),
                     )
                 )
-                in_channels = out_channels
+                last_channels = out_channels
             self.mlp_blocks.append(mlp)
 
     def forward(self, points_xyz, points_features):
@@ -307,20 +310,20 @@ class PointNetSetAbstractionMSG(nn.Module):
             group_inds = query_ball(radius, K, points_xyz, centroids_xyz)
             grouped_xyz = index_points(points_xyz, group_inds)  # [B, num_centroids, num_samples, C]
 
-            # Centralize the point coordinates to their associated centroids
+            # Centralize the coordinates of each point to its associated centroid
             grouped_xyz -= centroids_xyz.view(B, S, 1, C)
 
             if points_features is not None:
-                groupped_features = index_points(points_features, group_inds)
-                grouped_points = torch.cat([groupped_features, grouped_xyz], dim=-1)
+                grouped_features = index_points(points_features, group_inds)
+                grouped_points = torch.cat([grouped_features, grouped_xyz], dim=-1)
             else:
                 grouped_points = grouped_xyz
 
             grouped_points = grouped_points.permute(0, 3, 2, 1)  # [B, C+D, K, S]
 
             # Get the global features for each local region
-            for mlp in self.mlp_blocks:
-                grouped_points = mlp(grouped_points)
+            for layer in self.mlp_blocks[i]:
+                grouped_points = layer(grouped_points)
 
             # Get the final global features
             new_points = torch.max(grouped_points, 2)[0]  # [B, D', S]
@@ -346,7 +349,7 @@ class PointNetFeaturePropagation(nn.Module):
         for out_channels in mlp_channels:
             self.mlp.append(
                 nn.Sequential(
-                    nn.Conv2d(in_channels, out_channels),
+                    nn.Conv2d(in_channels, out_channels, 1),
                     nn.BatchNorm2d(out_channels),
                     nn.ReLU(),
                 )
@@ -427,7 +430,7 @@ class PointNet2SSGCls(nn.Module):
 
     def forward(self, points: torch.Tensor):
         """
-        @param points: [batch_size, num_points, num_channels] of point clouds.
+        @param points: [batch_size, num_channels, num_points] of point clouds.
         The first 3 channels are (x, y, z) coordinates. The later are features such as normal vector.
         @return:
         """
@@ -454,7 +457,7 @@ class PointNet2MSGCls(nn.Module):
     """
     def __init__(self, num_classes, normal_channel=True):
         super().__init__()
-        in_channels = 3 if normal_channel else 0
+        in_channels = 6 if normal_channel else 3
         self.normal_channel = normal_channel
         self.sa1 = PointNetSetAbstractionMSG(512,
                                              [0.1, 0.2, 0.4],
@@ -464,7 +467,7 @@ class PointNet2MSGCls(nn.Module):
         self.sa2 = PointNetSetAbstractionMSG(128,
                                              [0.2, 0.4, 0.8],
                                              [32, 64, 128],
-                                             320,
+                                             320 + 3,
                                              [[64, 64, 128], [128, 128, 256], [128, 128, 256]])
         self.sa3 = PointNetSetAbstraction(None, None, None,
                                           640 + 3, [256, 512, 1024], True)
@@ -477,21 +480,26 @@ class PointNet2MSGCls(nn.Module):
         self.fc3 = nn.Linear(256, num_classes)
 
     def forward(self, points):
+        """
+        @param points: [batch_size, num_channels, num_points] of point clouds.
+        The first 3 channels are (x, y, z) coordinates. The later are features such as normals.
+        @return:
+        """
         B, _, _ = points.shape
-        if self.normal_channel:
+        xyz = points[:, :3, :]
+        if self.normal_channel and points.shape[1] > 3:
             norm = points[:, 3:, :]
-            xyz = points[:, :3, :]
         else:
             norm = None
-        l1_xyz, l1_points = self.sa1(xyz, norm)
-        l2_xyz, l2_points = self.sa2(l1_xyz, l1_points)
-        l3_xyz, l3_points = self.sa3(l2_xyz, l2_points)
-        x = l3_points.view(B, 1024)
+        l1_xyz, l1_features = self.sa1(xyz, norm)
+        l2_xyz, l2_features = self.sa2(l1_xyz, l1_features)
+        l3_xyz, l3_features = self.sa3(l2_xyz, l2_features)
+        x = l3_features.view(B, 1024)
         x = self.drop1(nn.functional.relu(self.bn1(self.fc1(x))))
         x = self.drop2(nn.functional.relu(self.bn2(self.fc2(x))))
         x = self.fc3(x)
         x = nn.functional.log_softmax(x, -1)
-        return x, l3_points
+        return x, l3_features
 
 
 if __name__ == '__main__':
@@ -502,15 +510,16 @@ if __name__ == '__main__':
     test_loader = dm.test_dataloader()
 
     num_classes = 5
-    model = PointNet2SSGCls(num_classes, normal_channel=False)
+    model = PointNet2MSGCls(num_classes, normal_channel=False)
 
     for i, batch in enumerate(test_loader):
         if i >= 1:
             break
-        print(f"Batch {i} points:", points.shape)
-        print(f"Batch {i} labels:", labels.shape)
         points, labels = batch
         points = points.permute(0, 2, 1)
+        print(f"Batch {i} points:", points.shape)
+        print(f"Batch {i} labels:", labels.shape)
+
         out = model(points)
         print(f"Output log_softmax: {out[1].shape}")
     print("Total number of parameters:", sum(p.numel() for p in model.parameters() if p.requires_grad))
