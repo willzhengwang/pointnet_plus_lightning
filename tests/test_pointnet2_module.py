@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import pytest
 from src.models.pointnet2_module import (pc_normalize, square_distance, index_points, farthest_point_sample,
-                                         query_ball)
+                                         query_ball, PointNet2MSGCls)
 
 
 def test_pc_normalize():
@@ -57,3 +57,12 @@ def test_fps_and_ball_query():
 
     group_inds = query_ball(0.1, 10, batch_xyz, centroids)
     assert group_inds.shape == torch.Size([batch_size, num_centroids, 10])
+
+
+def test_pointnet2_msg_cls():
+    batch_size, num_classes = 2, 5
+    model = PointNet2MSGCls(num_classes, normal_channel=False)
+    points = torch.randn([batch_size, 3, 1000])  # [batch_size, num_channels, num_points]
+    out = model(points)
+    assert out[0].shape == torch.Size([batch_size, num_classes])
+    assert out[1].shape == torch.Size([batch_size, 1024, 1])
