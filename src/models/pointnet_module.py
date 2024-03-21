@@ -22,28 +22,28 @@ class TNet(nn.Module):
         super().__init__()
         self.k = k
         self.conv1 = nn.Sequential(
-            nn.Conv1d(k, 64, kernel_size=1, bias=False),
+            nn.Conv1d(k, 64, kernel_size=1, bias=True),
             nn.BatchNorm1d(64),
             nn.ReLU()
         )
         self.conv2 = nn.Sequential(
-            nn.Conv1d(64, 128, kernel_size=1, bias=False),
+            nn.Conv1d(64, 128, kernel_size=1, bias=True),
             nn.BatchNorm1d(128),
             nn.ReLU()
         )
         self.conv3 = nn.Sequential(
-            nn.Conv1d(128, 1024, kernel_size=1, bias=False),
+            nn.Conv1d(128, 1024, kernel_size=1, bias=True),
             nn.BatchNorm1d(1024),
             nn.ReLU()
         )
         # max(x, 2) + view(-1, 1024)
         self.fc1 = nn.Sequential(
-            nn.Linear(1024, 512, bias=False),
+            nn.Linear(1024, 512, bias=True),
             nn.BatchNorm1d(512),
             nn.ReLU()
         )
         self.fc2 = nn.Sequential(
-            nn.Linear(512, 256, bias=False),
+            nn.Linear(512, 256, bias=True),
             nn.BatchNorm1d(256),
             nn.ReLU()
         )
@@ -92,17 +92,17 @@ class FeatureNet(nn.Module):
             self.tnet_in = TNet(3)
 
         self.conv1 = nn.Sequential(
-            nn.Conv1d(in_channels, 64, kernel_size=1, bias=False),
+            nn.Conv1d(3, 64, kernel_size=1, bias=True),
             nn.BatchNorm1d(64),
             nn.ReLU()
         )
         if feature_transform:
             self.tnet64 = TNet(64)
         self.mlp = nn.Sequential(
-            nn.Conv1d(64, 128, kernel_size=1, bias=False),
+            nn.Conv1d(64, 128, kernel_size=1, bias=True),
             nn.BatchNorm1d(128),
             nn.ReLU(),
-            nn.Conv1d(128, 1024, kernel_size=1, bias=False),
+            nn.Conv1d(128, 1024, kernel_size=1, bias=True),
             nn.BatchNorm1d(1024),
             nn.ReLU(),
         )
@@ -139,10 +139,11 @@ class FeatureNet(nn.Module):
         return torch.cat([point_feat, global_feat], dim=1), trans_in, trans_feat
 
 
-def regularize_feat_transform(feat_trans):
+def regularize_feat_transform(feat_trans, reg_scale=0.001):
     """
     Regularization loss over the feature transformation matrix
     @param feat_trans: (batch_size, 64, 64)
+    @param reg_scale: regularization
     @return:
     """
     k = feat_trans.shape[-1]
@@ -151,7 +152,7 @@ def regularize_feat_transform(feat_trans):
         I = I.cuda()
     tmp = (torch.bmm(feat_trans, torch.transpose(feat_trans, 1, 2)) - I)
     reg_loss = torch.mean(torch.norm(tmp, dim=(1, 2)))
-    return reg_loss
+    return reg_loss * reg_scale
 
 
 class PointNetCls(nn.Module):
@@ -164,11 +165,11 @@ class PointNetCls(nn.Module):
 
         self.feat_net = FeatureNet(in_channels=in_channels, classification=True, feature_transform=feature_transform)
         self.mlp = nn.Sequential(
-            nn.Linear(1024, 512, bias=False),
+            nn.Linear(1024, 512, bias=True),
             nn.BatchNorm1d(512),
             nn.ReLU(),
 
-            nn.Linear(512, 256, bias=False),
+            nn.Linear(512, 256, bias=True),
             nn.Dropout(p=0.3),
             nn.BatchNorm1d(256),
             nn.ReLU(),
