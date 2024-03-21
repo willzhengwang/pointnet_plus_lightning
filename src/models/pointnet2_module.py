@@ -3,10 +3,14 @@
 PointNet++
 Reference: https://github.com/yanx27/Pointnet_Pointnet2_pytorch
 """
-from typing import List, Optional
+from typing import List, Optional, Any
 import numpy as np
+
 import torch
 from torch import nn
+from torchmetrics.classification import Accuracy
+from torchmetrics.aggregation import MeanMetric, MaxMetric
+from lightning import LightningModule
 
 
 def pc_normalize(pc: np.ndarray):
@@ -405,16 +409,17 @@ class PointNet2SSGCls(nn.Module):
     """
     PointNet++ with SSG Single-scale grouping) for classification
     """
-    def __init__(self, num_classes, normal_channel=True):
+    def __init__(self, num_classes, with_normals=True):
         """
         Init function
         @param num_classes: number of classes
-        @param normal_channel: True - input point clouds with additional normal vectors.
+        @param with_normals: True - input point clouds with additional normal vectors.
                                False: input only coordinates
         """
         super().__init__()
-        in_channels = 6 if normal_channel else 3
-        self.normal_channel = normal_channel
+        in_channels = 6 if with_normals else 3
+        self.num_classes = num_classes
+        self.with_normals = with_normals
         # self, num_centroids: int, radius: float, num_samples: int, in_channels: int,
         #                  mlp_channels: List[int], group_all: bool
         self.sa1 = PointNetSetAbstraction(512, 0.2, 32, in_channels, [64, 64, 128], group_all=False)
@@ -436,7 +441,7 @@ class PointNet2SSGCls(nn.Module):
         """
         B, _, _ = points.shape
         xyz = points[:, :3, :]
-        if self.normal_channel and points.shape[1] > 3:
+        if self.with_normals and points.shape[1] > 3:
             norm = points[:, 3:, :]
         else:
             norm = None
@@ -455,10 +460,16 @@ class PointNet2MSGCls(nn.Module):
     """
     PointNet++ with MSG (multi-scale grouping) for classification
     """
-    def __init__(self, num_classes, normal_channel=True):
+    def __init__(self, num_classes: int, with_normals: bool = True):
+        """
+        @param num_classes: number of classes
+        @param with_normals: Ture - point clouds have coordinates + normals.
+                             False - point clouds have coordinates only.
+        """
         super().__init__()
-        in_channels = 6 if normal_channel else 3
-        self.normal_channel = normal_channel
+        in_channels = 6 if with_normals else 3
+        self.num_classes = num_classes
+        self.with_normals = with_normals
         self.sa1 = PointNetSetAbstractionMSG(512,
                                              [0.1, 0.2, 0.4],
                                              [16, 32, 128],
@@ -487,7 +498,7 @@ class PointNet2MSGCls(nn.Module):
         """
         B, _, _ = points.shape
         xyz = points[:, :3, :]
-        if self.normal_channel and points.shape[1] > 3:
+        if self.with_normals and points.shape[1] > 3:
             norm = points[:, 3:, :]
         else:
             norm = None
@@ -497,29 +508,143 @@ class PointNet2MSGCls(nn.Module):
         x = l3_features.view(B, 1024)
         x = self.drop1(nn.functional.relu(self.bn1(self.fc1(x))))
         x = self.drop2(nn.functional.relu(self.bn2(self.fc2(x))))
-        x = self.fc3(x)
-        x = nn.functional.log_softmax(x, -1)
+        x = self.fc3(x)  # x == logits, use entropy_loss
+        # x = nn.functional.log_softmax(x, -1)  # use nll_loss
         return x, l3_features
 
 
-if __name__ == '__main__':
-    from src.data.shapenet_datamodule import ShapenetCoreDataModule
+class PointNet2MSGClsModule(LightningModule):
+    """
+    PointNet++ with MSG (Multi-Scale Grouping) Classifier - Lightning Module
+    """
+    def __init__(self, net: nn.Module, optimizer: torch.optim.Optimizer, scheduler: torch.optim.lr_scheduler,
+                 compile: bool = False):
+        """
+        Init function of the LightningModule
+        @param net: The model to train.
+        @param optimizer: The optimizer to use for training.
+        @param scheduler: The learning rate scheduler to use for training.
+        @param compile: True - compile model for faster training with pytorch 2.0.
+        """
+        super().__init__()
 
-    data_dir = 'data/shapenetcore_subset'
-    dm = ShapenetCoreDataModule(data_dir, batch_size=4, augmentation=True, classification=False)
-    test_loader = dm.test_dataloader()
+        # This line allows to access init params with 'self.hparams' attribute
+        # also ensures init params will be stored in ckpt.
+        # logger=True: send the hyperparameters to the logger.
+        self.save_hyperparameters(logger=True)
 
-    num_classes = 5
-    model = PointNet2MSGCls(num_classes, normal_channel=False)
+        self.net = net
 
-    for i, batch in enumerate(test_loader):
-        if i >= 1:
-            break
+        self.criterion = nn.CrossEntropyLoss()
+
+        # metric objects for calculating and averaging accuracy across batches
+        self.train_acc = Accuracy(task="multiclass", num_classes=net.num_classes)
+        self.val_acc = Accuracy(task="multiclass", num_classes=net.num_classes)
+        self.test_acc = Accuracy(task="multiclass", num_classes=net.num_classes)
+
+        # for averaging loss across batches
+        self.train_loss = MeanMetric()
+        self.val_loss = MeanMetric()
+        self.test_loss = MeanMetric()
+
+        # for tracking best so far validation accuracy
+        self.val_acc_best = MaxMetric()
+
+    def setup(self, stage: str) -> None:
+        """
+        Lightning hook that is called at the beginning of fit (train + validate),
+        validate, test, or predict.
+
+        This is a good hook when you need to build models dynamically or adjust something about
+        them. This hook is called on every process when using DDP.
+
+        @param stage: Either `"fit"`, `"validate"`, `"test"`, or `"predict"`.
+        """
+        if self.hparams.compile and stage == "fit":
+            self.net = torch.compile(self.net)
+
+    def on_train_start(self) -> None:
+        """
+        Lightning hook that is called when training begins
+        """
+        # by default lightning executes validation step sanity checks before training starts,
+        # so it's worth to make sure validation metrics don't store results from these checks
+        self.val_loss.reset()
+        self.val_acc.reset()
+        self.val_acc_best.reset()
+
+    def forward(self, x):
+        return self.net(x)
+
+    def model_step(self, batch):
+        """
+        Forward + Loss + Predict a batch of data
+        """
         points, labels = batch
-        points = points.permute(0, 2, 1)
-        print(f"Batch {i} points:", points.shape)
-        print(f"Batch {i} labels:", labels.shape)
+        points = points.permute(0, 2, 1)  # (batch_size, 3+num_features, num_point)
 
-        out = model(points)
-        print(f"Output log_softmax: {out[1].shape}")
-    print("Total number of parameters:", sum(p.numel() for p in model.parameters() if p.requires_grad))
+        logits, _ = self.forward(points)  # logits: batch_size * num_classes
+        loss = self.criterion(logits, labels)
+        preds = torch.argmax(logits, dim=1)
+        return loss, preds, labels
+
+    def training_step(self, batch: tuple, batch_idx: int):
+        """
+        Perform a single training step on a batch of data from the training set.
+
+        @param batch: A batch of data (a tuple) containing the input tensor of images and target labels.
+        @param batch_idx: The index of the current batch.
+        @return: A tensor of losses between model predictions and targets.
+        """
+        loss, preds, labels = self.model_step(batch)
+
+        # update and log metrics
+        self.train_loss(loss)
+        self.train_acc(preds, labels)
+
+        self.log("train/loss", self.train_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/acc", self.train_acc, on_step=True, on_epoch=True, prog_bar=True)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        """
+        Perform a single validation step on a batch of data from the validation set
+        """
+        loss, preds, labels = self.model_step(batch)
+
+        # update and log metrics
+        self.val_loss(loss)
+        self.val_acc(preds, labels)
+
+        self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
+
+    def test_step(self, batch, batch_idx):
+        """
+        Perform a single test step on a batch of data from the test set.
+        """
+        loss, preds, labels = self.model_step(batch)
+
+        # update and log metrics
+        self.test_loss(loss)
+        self.test_acc(preds, labels)
+
+    def configure_optimizers(self):
+        """
+        Choose what optimizers and learning-rate schedulers to use in your optimization.
+        Normally you'd need one. But in the case of GANs or similar you might have multiple.
+
+        @return: A dict containing the configured optimizers and learning-rate schedulers to be used for training.
+        """
+        optimizer = self.hparams.optimizer(params=self.parameters())
+        if self.hparams.scheduler is not None:
+            scheduler = self.hparams.scheduler(optimizer=optimizer)
+            return {
+                'optimizer': optimizer,
+                'lr_scheduler': scheduler,
+                'monitor': 'val/loss',
+                'interval': 'epoch',
+                'frequency': 1,
+            }
+        return {'optimizer': optimizer}

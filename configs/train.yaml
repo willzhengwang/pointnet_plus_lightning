@@ -5,7 +5,7 @@
 defaults:
   - _self_
   - data: shapenet_cls # mnist  #
-  - model: pointnet_cls # mnist  #
+  - model: pointnet2msg_cls # mnist  #
   - callbacks: default
   - logger: tensorboard  # null # set logger here or use command line (e.g. `python train.py logger=tensorboard`)
   - trainer: default

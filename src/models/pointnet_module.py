@@ -185,7 +185,7 @@ class PointNetCls(nn.Module):
 
 class PointNetClsModule(LightningModule):
     """
-    PontNet Classifier - Lightning Module
+    PointNet Classifier - Lightning Module
     """
     def __init__(self,
                  net: nn.Module,
