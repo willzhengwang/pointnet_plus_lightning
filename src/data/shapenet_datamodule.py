@@ -3,15 +3,14 @@ from typing import List
 import json
 import os
 from os import path
-from collections import defaultdict
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from lightning import LightningDataModule
 from lightning.pytorch.utilities.types import EVAL_DATALOADERS, TRAIN_DATALOADERS
 
 
-class ShapenetCoreDataset(LightningDataModule):
+class ShapenetCoreDataset(Dataset):
     """
     ShapeNetCore is a subset of the full ShapeNet dataset with single clean 3D models and manually
     verified category and alignment annotations. It covers 55 common object categories with about 51,300
@@ -85,10 +84,10 @@ class ShapenetCoreDataset(LightningDataModule):
         pts_file = path.join(self.data_dir, cat_id, 'points', item + '.pts')
         points = np.loadtxt(pts_file, dtype=np.float32, delimiter=' ')
 
-        if points.shape[0] > self.num_points:
+        if points.shape[0] >= self.num_points:
             choice = np.random.choice(points.shape[0], self.num_points, replace=False)
             points = points[choice, :]
-        elif points.shape[0] < self.num_points:
+        else:  # if points.shape[0] < self.num_points:
             choice = np.random.choice(points.shape[0], self.num_points)
             points = points[choice, :]
 
