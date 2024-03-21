@@ -531,7 +531,7 @@ class PointNet2MSGClsModule(LightningModule):
         # This line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt.
         # logger=True: send the hyperparameters to the logger.
-        self.save_hyperparameters(logger=True)
+        self.save_hyperparameters(logger=False)
 
         self.net = net
 
