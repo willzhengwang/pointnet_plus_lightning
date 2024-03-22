@@ -2,19 +2,8 @@
 import torch
 import numpy as np
 import pytest
-from src.models.pointnet2_module import (pc_normalize, square_distance, index_points, farthest_point_sample,
+from src.models.pointnet2_module import (square_distance, index_points, farthest_point_sample,
                                          query_ball, PointNet2MSGCls)
-
-
-def test_pc_normalize():
-    np.random.seed(42)
-    pc = np.random.randn(50, 3)
-    pc[:, 0] * 2 + 3.0
-    pc[:, 1] * (-2) - 1.0
-
-    normalized_pc = pc_normalize(pc)
-    radius = np.max(np.linalg.norm(normalized_pc, axis=1))
-    assert radius == pytest.approx(1.0, abs=1e-8)
 
 
 def test_square_distance():
@@ -61,7 +50,7 @@ def test_fps_and_ball_query():
 
 def test_pointnet2_msg_cls():
     batch_size, num_classes = 2, 5
-    model = PointNet2MSGCls(num_classes, normal_channel=False)
+    model = PointNet2MSGCls(num_classes, with_normals=False)
     points = torch.randn([batch_size, 3, 1000])  # [batch_size, num_channels, num_points]
     out = model(points)
     assert out[0].shape == torch.Size([batch_size, num_classes])

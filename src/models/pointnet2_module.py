@@ -3,29 +3,12 @@
 PointNet++
 Reference: https://github.com/yanx27/Pointnet_Pointnet2_pytorch
 """
-from typing import List, Optional, Any
-import numpy as np
-
+from typing import List, Optional
 import torch
 from torch import nn
 from torchmetrics.classification import Accuracy
 from torchmetrics.aggregation import MeanMetric, MaxMetric
 from lightning import LightningModule
-
-
-def pc_normalize(pc: np.ndarray):
-    """
-    Normalizes a point cloud by subtracting the mean and scaling to unit radius.
-    @param pc: num_points * num_features array of a point clout
-    @return:
-    """
-    centroid = np.mean(pc, axis=0)
-    pc = pc - centroid
-
-    # Find the furthest point from the origin to use as the radius
-    radius = max(np.max(np.linalg.norm(pc, axis=1)), np.finfo(float).eps)  # Avoid division by zero
-    pc = pc / radius  # Scale the point cloud to unit radius
-    return pc
 
 
 def square_distance(src: torch.Tensor, dst: torch.Tensor) -> torch.Tensor:

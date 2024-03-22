@@ -1,5 +1,5 @@
 _target_: src.data.shapenet_datamodule.ShapenetCoreDataModule
-data_dir: ${paths.data_dir}/shapenetcore_subset
+data_dir: ${paths.data_dir}/shapenetcore_normals
 batch_size: 32
 classification: True
 augmentation: True

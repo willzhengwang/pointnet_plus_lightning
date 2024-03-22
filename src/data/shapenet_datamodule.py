@@ -10,19 +10,41 @@ from lightning import LightningDataModule
 from lightning.pytorch.utilities.types import EVAL_DATALOADERS, TRAIN_DATALOADERS
 
 
+def pc_normalize(pc: np.ndarray):
+    """
+    Normalizes a point cloud by subtracting the mean and scaling to unit radius.
+    @param pc: num_points * num_features array of a point clout
+    @return:
+    """
+    centroid = np.mean(pc, axis=0)
+    pc = pc - centroid
+
+    # Find the furthest point from the origin to use as the radius
+    radius = max(np.max(np.linalg.norm(pc, axis=1)), np.finfo(float).eps)  # Avoid division by zero
+    pc = pc / radius  # Scale the point cloud to unit radius
+    return pc
+
+
 class ShapenetCoreDataset(Dataset):
     """
+    ShapeNetCore dataset - coordinates with normals.
     ShapeNetCore is a subset of the full ShapeNet dataset with single clean 3D models and manually
     verified category and alignment annotations. It covers 55 common object categories with about 51,300
     unique 3D models.
+
+    Dataset structure:
+    <data_dir> contains a number of sub folders. Each sub folder is named by <category_id> such as 02691156 and contains
+    a list of txt file.
+    Each text file contains N * 7 float array. In each row,  (x, y, z, nx, ny, nz, segment_label), like the following
+    0.090740 -0.131890 -0.081920 -0.116500 -0.033230 -0.992600 1.000000
     """
     def __init__(self, data_dir: str, dataset_type: str, classification: bool, augmentation: bool,
                  num_points: int = 2500):
         """
         Initialize a dataset instance
-        @param data_dir: data/shapenetcore_subset
+        @param data_dir: data/shapenetcore_normals
         @param dataset_type: choices=['train', 'val', 'test']
-        @param classification: True - classification. False: segmentation.
+        @param classification: True for classification; False for segmentation.
         @param augmentation: True - apply data augmentation.
         @param num_points: The number of points in each point cloud is different, a batch requires each sample
         (point cloud) with the same length. Therefore, we need to resample each point cloud to the same length
@@ -30,8 +52,8 @@ class ShapenetCoreDataset(Dataset):
         super().__init__()
 
         self.data_dir = data_dir
-        self.classification = classification
         self.augmentation = augmentation
+        self.classification = classification
         self.num_points = num_points
         self.cat2id, self.id2cat = self.get_categories()
 
@@ -42,7 +64,7 @@ class ShapenetCoreDataset(Dataset):
     def get_files(self, category: str) -> List:
         """
         Get files of a certain category
-        @param category: category name
+        @param category:  name
         @return:
         """
         cat_id = self.cat2id[category]
@@ -71,18 +93,24 @@ class ShapenetCoreDataset(Dataset):
     def __len__(self):
         return len(self.file_list)
 
-    def __getitem__(self, i: int):
+    def __getitem__(self, idx: int):
         """
         Return the input x and label/target for the i-th sample
-        @param i: index
+        @param idx: index
         @return:
-            torch.tensor points: n_pts * 3
-            torch.tensor label: when classification=True: a single class label
+            torch.Tensor points: n_pts * 3
+            torch.Tensor label: when classification=True: a single class label
                                 when classification=False: n_pts * 1 of segmentation labels
         """
-        _, cat_id, item = self.file_list[i].split('/')
-        pts_file = path.join(self.data_dir, cat_id, 'points', item + '.pts')
+        _, cat_id, item = self.file_list[idx].split('/')
+        pts_file = path.join(self.data_dir, cat_id, item + '.txt')
         points = np.loadtxt(pts_file, dtype=np.float32, delimiter=' ')
+        points[:, 0:3] = pc_normalize(points[:, 0:3])
+
+        if self.classification:
+            cls_label = np.array([self.id2cat[cat_id][1]], dtype=np.int64)
+        else:
+            seg_labels = np.array(points[:, -1], dtype=np.int64)
 
         if points.shape[0] >= self.num_points:
             choice = np.random.choice(points.shape[0], self.num_points, replace=False)
@@ -91,31 +119,39 @@ class ShapenetCoreDataset(Dataset):
             choice = np.random.choice(points.shape[0], self.num_points)
             points = points[choice, :]
 
+        points = np.array(points[:, :6], dtype=np.float32)
         if self.augmentation:
             theta = np.random.uniform(0, np.pi * 2)
             rotation_matrix = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
-            points[:, [0, 2]] = points[:, [0, 2]].dot(rotation_matrix)  # random rotation
-            points += np.random.normal(0, 0.02, size=points.shape)  # random jitter
+            points[:, [0, 2]] = points[:, [0, 2]].dot(rotation_matrix)  # random rotation of (x, y, z)
+            points[:, [3, 5]] = points[:, [3, 5]].dot(rotation_matrix)  # random rotation of (nx, ny, nz)
 
         # for classification
         if self.classification:
-            label = np.array([self.id2cat[cat_id][1]], dtype=np.int64)
-            return torch.from_numpy(points), torch.from_numpy(label.squeeze())
-        # for segmentation:
-        seg_file = path.join(self.data_dir, cat_id, 'points_label', item + '.seg')
-        label = np.loadtxt(seg_file, dtype=np.int64, delimiter=' ')
-        label = label[choice]
-        return torch.from_numpy(points), torch.from_numpy(label.squeeze())
+            return torch.from_numpy(points), torch.from_numpy(cls_label)
+        # for segmentation
+        return torch.from_numpy(points), torch.from_numpy(seg_labels[choice].squeeze())
 
 
 class ShapenetCoreDataModule(LightningDataModule):
     """
     ShapenetCore Data module
     """
-    def __init__(self, data_dir, batch_size=8, classification=True, augmentation=False, num_workers=4, num_points=2500):
+    def __init__(self, data_dir, batch_size=8, classification=True, augmentation=False,
+                 num_workers=4, num_points=2500):
+        """
+        Initialize a ShapenetCoreDataModule instance
+
+        @param data_dir: data folder path
+        @param batch_size: batch size
+        @param classification: True for classification; False for segmentation.
+        @param augmentation: data augmentation, such as rotation.
+        @param num_workers: number of workers on the data loading.
+        @param num_points: The number of points in each point cloud is different, a batch requires each sample
+        (point cloud) with the same length. Therefore, we need to resample each point cloud to the same length
+        """
         super().__init__()
         self.data_dir = data_dir
-        self.classification = classification
         self.augmentation = augmentation
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -162,42 +198,14 @@ class ShapenetCoreDataModule(LightningDataModule):
         return data_loader
 
 
-def show_pcd(points, labels):
-    """
-    Visualize a point cloud sample
-    @param points:
-    @param labels:
-    @return:
-    """
-    import open3d as o3d
-
-    # Create an Open3D PointCloud object
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points)
-
-    # Map label values to colors
-    num_labels = int(np.max(labels))
-    label_colors = np.random.rand(num_labels + 1, 3)  # Generate random colors for each label
-    colors = label_colors[labels.astype(int)]  # Map labels to colors
-
-    # Assign colors to the point cloud based on the labels
-    pcd.colors = o3d.utility.Vector3dVector(colors)
-
-    # Visualize the point cloud
-    o3d.visualization.draw_geometries([pcd])
-
-
 if __name__ == '__main__':
-    data_dir = 'data/shapenetcore_subset'
-    dm = ShapenetCoreDataModule(data_dir, batch_size=2, augmentation=True, classification=False)
-    train_loader = dm.train_dataloader()
-
-    for i, batch in enumerate(train_loader):
-        if i > 1:
+    data_dir = 'data/shapenetcore_normals'
+    dm = ShapenetCoreDataModule(data_dir, batch_size=2, classification=True, augmentation=True)
+    test_loader = dm.test_dataloader()
+    for i, batch in enumerate(test_loader):
+        if i >= 1:
             break
         points, labels = batch
-        for j in range(points.shape[0]):
-            show_pcd(points[j].numpy(), labels[j].numpy())
         print(f"Batch {i} points:", points.shape)
         print(f"Batch {i} labels:", labels.shape)
 
