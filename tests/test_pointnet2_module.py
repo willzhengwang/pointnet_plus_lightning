@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 import torch
-import numpy as np
 import pytest
 from src.models.pointnet2_module import (square_distance, index_points, farthest_point_sample,
-                                         query_ball, PointNet2MSGCls)
+                                         query_ball, PointNet2MSGCls, PointNet2SSGPartSeg)
 
 
 def test_square_distance():
@@ -55,3 +54,14 @@ def test_pointnet2_msg_cls():
     out = model(points)
     assert out[0].shape == torch.Size([batch_size, num_classes])
     assert out[1].shape == torch.Size([batch_size, 1024, 1])
+
+
+def test_pointnet2_ssg_part_seg():
+    batch_size, num_classes, num_points = 2, 50, 1000
+    model = PointNet2SSGPartSeg(num_classes, with_normals=True)
+    points = torch.randn([batch_size, 6, num_points])  # [batch_size, num_channels, num_points]
+    seg_labels = torch.randint(0, num_classes, [batch_size, num_points])
+    preds = model(points)
+    assert preds.shape == torch.Size([batch_size, num_points, num_classes])
+    loss = torch.nn.functional.cross_entropy(preds.reshape(-1, num_classes), torch.squeeze(seg_labels.view(-1, 1)))
+

@@ -164,6 +164,7 @@ def sample_and_group(num_centroids: int, radius: float, num_samples: int, points
 def sample_and_group_all(points_xyz, points_features):
     """
     Sample and group all points into one local region. There is only one centroid.
+
     @param points_xyz: (batch_size, num_points, 3) - coordinates of point clouds
     @param points_features: (batch_size, num_points, D) - features of point clouds
     @return:
@@ -324,20 +325,19 @@ class PointNetSetAbstractionMSG(nn.Module):
 class PointNetFeaturePropagation(nn.Module):
     """
     In PointNetSetAbstraction (PointNetSetAbstractionMSG) layer, the original point set is subsampled.
-    However, in set segmentation task, we want to obtain point features for all the original points.
+    However, in a segmentation task, we want to obtain point features for all the original points.
 
-    This PointNetFeaturePropagation aims to propagate features from subsampled points to the original points.
+    PointNetFeaturePropagation aims to propagate features from subsampled points to the original points.
     It's achieved by inverse distance weighted interpolation.
     """
-    def __init__(self, in_channels, mlp_channels):
+    def __init__(self, in_channels: int, mlp_channels: List[int]):
         super().__init__()
-
         self.mlp = nn.ModuleList()
         for out_channels in mlp_channels:
             self.mlp.append(
                 nn.Sequential(
-                    nn.Conv2d(in_channels, out_channels, 1),
-                    nn.BatchNorm2d(out_channels),
+                    nn.Conv1d(in_channels, out_channels, 1),
+                    nn.BatchNorm1d(out_channels),
                     nn.ReLU(),
                 )
             )
@@ -345,25 +345,25 @@ class PointNetFeaturePropagation(nn.Module):
 
     def forward(self, original_xyz, sampled_xyz, original_features, sampled_features):
         """
-        # TODO:
-        Upsample points data.
-        @param original_xyz:
-        @param sampled_xyz:
-        @param original_features:
-        @param sampled_features:
+        Upsample / Interpolate features of points.
+
+        @param original_xyz: (B, 3, num_points), Coordinates of the original points where sampled_xyz are sampled from.
+        @param sampled_xyz: (B, 3, num_centroids), Coordinates of the downsampled points.
+        @param original_features: (B, num_original_features, num_points), Features of the original points.
+        @param sampled_features: (B, num__sampled_features, num_centroids),  Features of the downsampled points.
         @return:
-            features
+            new_features: (B, num_original_features+num__sampled_features, num_points).
         """
         original_xyz = original_xyz.permute(0, 2, 1)
         sampled_xyz = sampled_xyz.permute(0, 2, 1)
 
-        sampled_features = sampled_features.permute(0, 2, 1)  # ?!
+        sampled_features = sampled_features.permute(0, 2, 1)
 
         B, N, C = original_xyz.shape
         _, S, _ = sampled_xyz.shape
 
         if S == 1:
-            interp_features = sampled_features.permute(1, N, 1)
+            interp_features = sampled_features.repeat(1, N, 1)
         else:
             # interpolating features by means of inverse distance weighted average
             dists = square_distance(original_xyz, sampled_xyz)
@@ -382,8 +382,9 @@ class PointNetFeaturePropagation(nn.Module):
             new_features = interp_features
 
         # Apply mlp to concatenated features.
-        for mlp in self.mlp_blocks:
-            new_features = mlp(new_features)
+        new_features = new_features.permute(0, 2, 1)  # (B, num_channels, num_points)
+        for layer in self.mlp:
+            new_features = layer(new_features)
 
         return new_features
 
@@ -434,8 +435,8 @@ class PointNet2SSGCls(nn.Module):
         x = l3_features.view(B, 1024)
         x = self.drop1(nn.functional.relu(self.bn1(self.fc1(x))))
         x = self.drop2(nn.functional.relu(self.bn2(self.fc2(x))))
-        x = self.fc3(x)
-        x = nn.functional.log_softmax(x, -1)
+        x = self.fc3(x)  # x == logits, use entropy_loss
+        # x = nn.functional.log_softmax(x, -1)  # use nll_loss
         return x, l3_features
 
 
@@ -453,6 +454,9 @@ class PointNet2MSGCls(nn.Module):
         in_channels = 6 if with_normals else 3
         self.num_classes = num_classes
         self.with_normals = with_normals
+        # Note that the change trend of num_centroids, radius, num_samples, and mlp_channels is very similar to CNN on
+        # images. Basically, the depth (number of channels) increases with the increase of receptive field, and with
+        # the decrease of the spatial resolution (number of centroids).
         self.sa1 = PointNetSetAbstractionMSG(512,
                                              [0.1, 0.2, 0.4],
                                              [16, 32, 128],
@@ -494,6 +498,69 @@ class PointNet2MSGCls(nn.Module):
         x = self.fc3(x)  # x == logits, use entropy_loss
         # x = nn.functional.log_softmax(x, -1)  # use nll_loss
         return x, l3_features
+
+
+class PointNet2SSGPartSeg(nn.Module):
+    """
+    PointNet++ with SSG (single-scale grouping) for part segmentation
+    """
+    def __init__(self, num_classes: int, with_normals=True):
+        super().__init__()
+
+        self.num_classes = num_classes
+        self.with_normals = with_normals
+        in_channels = 6 if with_normals else 3
+        self.sa1 = PointNetSetAbstraction(512, 0.2, 32, in_channels,
+                                          [64, 64, 128], False)
+        self.sa2 = PointNetSetAbstraction(128, 0.4, 64, 128 + 3,
+                                          [128, 128, 256], False)
+        # sa3 group all into one centroid
+        self.sa3 = PointNetSetAbstraction(None, None, None, 256 + 3,
+                                          [256, 512, 1024], True)
+
+        self.fp3 = PointNetFeaturePropagation(256 + 1024, [256, 256])
+        self.fp2 = PointNetFeaturePropagation(128 + 256, [256, 128])
+
+        # in fp1, the in_channels: 3*2: dimension_of_coords + dimension_of_normals. This is different from
+        # https://github.com/yanx27/Pointnet_Pointnet2_pytorch/blob/master/models/pointnet2_part_seg_ssg.py
+        self.fp1 = PointNetFeaturePropagation(128 + 3 + 3, [128, 128, 128])
+        # FC layers for segmentation
+        self.fc1 = nn.Sequential(
+            nn.Conv1d(128, 128, 1),  # bias can be set as False as it's followed by a BN
+            nn.BatchNorm1d(128),
+            nn.Dropout(p=0.5),
+        )
+        self.conv = nn.Conv1d(128, num_classes, 1)
+
+    def forward(self, points: torch.Tensor):
+        """
+        @param points: [batch_size, num_channels, num_points] of point clouds.
+        The first 3 channels are (x, y, z) coordinates. The later are features such as normals.
+        # @param seg_labels: [batch_size, 1, num_points] segmentation labels
+        @return:
+        """
+        B, _, N = points.shape
+        l0_xyz = points[:, :3, :]
+        if self.with_normals and points.shape[1] > 3:
+            l0_features = points[:, 3:, :]
+        else:
+            l0_features = None
+        l1_xyz, l1_features = self.sa1(l0_xyz, l0_features)
+        l2_xyz, l2_features = self.sa2(l1_xyz, l1_features)
+        l3_xyz, l3_features = self.sa3(l2_xyz, l2_features)
+
+        # Feature propagation
+        l2_features = self.fp3(l2_xyz, l3_xyz, l2_features, l3_features)
+        l1_features = self.fp2(l1_xyz, l2_xyz, l1_features, l2_features)
+
+        # The seg_labels are used as features and concatenated with coords and normals in the implementation:
+        # https://github.com/yanx27/Pointnet_Pointnet2_pytorch/blob/master/models/pointnet2_part_seg_ssg.py
+        l0_features = self.fp1(l0_xyz, l1_xyz, torch.cat([l0_xyz, l0_features], dim=1), l1_features)
+
+        x = self.fc1(l0_features)
+        x = self.conv(x)
+        x = x.permute(0, 2, 1)  # logits, use entropy_loss
+        return x
 
 
 class PointNet2ClsModule(LightningModule):
