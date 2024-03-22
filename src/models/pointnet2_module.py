@@ -771,13 +771,12 @@ class PointNet2SegModule(LightningModule):
         """
         points, seg_labels = batch
         points = points.permute(0, 2, 1)  # (batch_size, 3+num_features, num_point)
-
         logits = self.forward(points)  # logits: batch_size * num_points * num_classes
         logits = logits.reshape(-1, self.net.num_classes)
-        seg_labels = torch.squeeze(seg_labels.view(-1, 1))
-        loss = self.criterion(logits, seg_labels)
+        labels = seg_labels.view(-1, 1)[:, 0]
+        loss = self.criterion(logits, labels)
         preds = torch.argmax(logits, dim=1)
-        return loss, preds, seg_labels
+        return loss, preds, labels
 
     def training_step(self, batch: tuple, batch_idx: int):
         """

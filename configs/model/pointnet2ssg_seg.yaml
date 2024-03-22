@@ -20,7 +20,7 @@ scheduler:
 
 net:
   _target_: src.models.pointnet2_module.PointNet2SSGPartSeg
-  num_classes: 16
+  num_classes: 50
   with_normals: True
 
 # compile model for faster training with pytorch 2.0
