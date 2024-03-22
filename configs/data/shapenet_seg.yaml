@@ -1,0 +1,7 @@
+_target_: src.data.shapenet_datamodule.ShapenetCoreDataModule
+data_dir: ${paths.data_dir}/shapenetcore_normals
+batch_size: 16
+classification: False
+augmentation: True
+num_workers: 8
+num_points: 2500
