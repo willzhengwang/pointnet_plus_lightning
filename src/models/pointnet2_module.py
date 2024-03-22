@@ -612,6 +612,8 @@ class PointNet2MSGClsModule(LightningModule):
         # update and log metrics
         self.test_loss(loss)
         self.test_acc(preds, labels)
+        self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
 
     def configure_optimizers(self):
         """
