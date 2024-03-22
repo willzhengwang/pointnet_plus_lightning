@@ -496,15 +496,15 @@ class PointNet2MSGCls(nn.Module):
         return x, l3_features
 
 
-class PointNet2MSGClsModule(LightningModule):
+class PointNet2ClsModule(LightningModule):
     """
-    PointNet++ with MSG (Multi-Scale Grouping) Classifier - Lightning Module
+    PointNet++ classification - Lightning Module
     """
     def __init__(self, net: nn.Module, optimizer: torch.optim.Optimizer, scheduler: torch.optim.lr_scheduler,
                  compile: bool = False):
         """
         Init function of the LightningModule
-        @param net: The model to train.
+        @param net: The model to train. Either PointNet2MSGCls or PointNet2SSGCls.
         @param optimizer: The optimizer to use for training.
         @param scheduler: The learning rate scheduler to use for training.
         @param compile: True - compile model for faster training with pytorch 2.0.

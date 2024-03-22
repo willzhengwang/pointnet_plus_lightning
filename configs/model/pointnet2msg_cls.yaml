@@ -1,4 +1,4 @@
-_target_: src.models.pointnet2_module.PointNet2MSGClsModule
+_target_: src.models.pointnet2_module.PointNet2ClsModule
 
 optimizer:
   _target_: torch.optim.Adam
