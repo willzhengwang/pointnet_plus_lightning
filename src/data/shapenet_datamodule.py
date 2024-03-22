@@ -128,7 +128,7 @@ class ShapenetCoreDataset(Dataset):
 
         # for classification
         if self.classification:
-            return torch.from_numpy(points), torch.from_numpy(cls_label)
+            return torch.from_numpy(points), torch.from_numpy(cls_label.squeeze())
         # for segmentation
         return torch.from_numpy(points), torch.from_numpy(seg_labels[choice].squeeze())
 
