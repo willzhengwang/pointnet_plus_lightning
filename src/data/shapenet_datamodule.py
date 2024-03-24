@@ -60,9 +60,6 @@ class ShapenetCoreDataset(Dataset):
         self.json_file = os.path.join(data_dir, 'train_test_split', 'shuffled_{}_file_list.json'.format(dataset_type))
         with open(self.json_file) as f:
             self.file_list = json.load(f)
-            # TODO: for testing purpose. Delete the two lines below.
-            l = len(self.file_list) // 20
-            self.file_list = self.file_list[:l]
 
         # a map from category to segment labels
         self.segments = {
