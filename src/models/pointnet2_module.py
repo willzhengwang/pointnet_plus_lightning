@@ -729,11 +729,6 @@ class PointNet2SegModule(LightningModule):
 
         self.criterion = nn.CrossEntropyLoss()
 
-        # metric objects for calculating and averaging accuracy across batches
-        self.train_acc = Accuracy(task="multiclass", num_classes=net.num_classes)
-        self.val_acc = Accuracy(task="multiclass", num_classes=net.num_classes)
-        self.test_acc = Accuracy(task="multiclass", num_classes=net.num_classes)
-
         # for averaging loss across batches
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
@@ -800,9 +795,7 @@ class PointNet2SegModule(LightningModule):
         logits = logits.reshape(-1, self.net.num_classes)
         labels = seg_labels.view(-1, 1)[:, 0]
         loss = self.criterion(logits, labels)
-        preds = torch.argmax(logits, dim=1)
-
-        return loss, preds, labels, instance_ious
+        return loss, instance_ious
 
     def training_step(self, batch: tuple, batch_idx: int):
         """
@@ -812,17 +805,15 @@ class PointNet2SegModule(LightningModule):
         @param batch_idx: The index of the current batch.
         @return: A tensor of losses between model predictions and targets.
         """
-        loss, preds, labels, ious = self.model_step(batch)
+        loss, ious = self.model_step(batch)
 
         # update and log metrics
         self.train_loss(loss)
-        self.train_acc(preds, labels)
         self.train_iou(torch.mean(torch.tensor(ious)))
         self.test_ious.extend(ious)
 
         self.log("train/loss", self.train_loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/acc", self.train_acc, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/iou", self.train_iou, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/iou", self.train_iou, on_step=True, on_epoch=True, prog_bar=True)
 
         return loss
 
@@ -830,29 +821,25 @@ class PointNet2SegModule(LightningModule):
         """
         Perform a single validation step on a batch of data from the validation set
         """
-        loss, preds, labels, ious = self.model_step(batch)
+        loss, ious = self.model_step(batch)
 
         # update and log metrics
         self.val_loss(loss)
-        self.val_acc(preds, labels)
         self.val_iou(torch.mean(torch.tensor(ious)))
 
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/iou", self.val_iou, on_step=False, on_epoch=True, prog_bar=True)
 
     def test_step(self, batch, batch_idx):
         """
         Perform a single test step on a batch of data from the test set.
         """
-        loss, preds, labels, ious = self.model_step(batch)
+        loss, ious = self.model_step(batch)
 
         # update and log metrics
         self.test_loss(loss)
-        self.test_acc(preds, labels)
         self.test_iou(torch.mean(torch.tensor(ious)))
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test/iou", self.test_iou, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_test_end(self) -> None:
