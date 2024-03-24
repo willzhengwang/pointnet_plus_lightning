@@ -60,6 +60,17 @@ class ShapenetCoreDataset(Dataset):
         self.json_file = os.path.join(data_dir, 'train_test_split', 'shuffled_{}_file_list.json'.format(dataset_type))
         with open(self.json_file) as f:
             self.file_list = json.load(f)
+            # TODO: for testing purpose. Delete the two lines below.
+            l = len(self.file_list) // 20
+            self.file_list = self.file_list[:l]
+
+        # a map from category to segment labels
+        self.segments = {
+            'Airplane': [0, 1, 2, 3], 'Bag': [4, 5], 'Cap': [6, 7], 'Car': [8, 9, 10, 11],
+            'Chair': [12, 13, 14, 15], 'Earphone': [16, 17, 18],  'Guitar': [19, 20, 21],
+            'Knife': [22, 23],  'Lamp': [24, 25, 26, 27], 'Laptop': [28, 29],
+            'Motorbike': [30, 31, 32, 33, 34, 35], 'Mug': [36, 37], 'Pistol': [38, 39, 40],
+            'Rocket': [41, 42, 43], 'Skateboard': [44, 45, 46], 'Table': [47, 48, 49]}
 
     def get_files(self, category: str) -> List:
         """
@@ -107,9 +118,9 @@ class ShapenetCoreDataset(Dataset):
         points = np.loadtxt(pts_file, dtype=np.float32, delimiter=' ')
         points[:, 0:3] = pc_normalize(points[:, 0:3])
 
-        if self.classification:
-            cls_label = np.array([self.id2cat[cat_id][1]], dtype=np.int64)
-        else:
+        cls_label = np.array([self.id2cat[cat_id][1]], dtype=np.int64)
+        if not self.classification:
+            # for segmentation
             seg_labels = np.array(points[:, -1], dtype=np.int64)
 
         if points.shape[0] >= self.num_points:
@@ -130,7 +141,10 @@ class ShapenetCoreDataset(Dataset):
         if self.classification:
             return torch.from_numpy(points), torch.from_numpy(cls_label.squeeze())
         # for segmentation
-        return torch.from_numpy(points), torch.from_numpy(seg_labels[choice].squeeze())
+        encoded_segments = ','.join(map(str, self.segments[self.id2cat[cat_id][0]]))
+        return torch.from_numpy(points), \
+               torch.from_numpy(seg_labels[choice].squeeze()), \
+               encoded_segments
 
 
 class ShapenetCoreDataModule(LightningDataModule):
@@ -200,13 +214,14 @@ class ShapenetCoreDataModule(LightningDataModule):
 
 if __name__ == '__main__':
     data_dir = 'data/shapenetcore_normals'
-    dm = ShapenetCoreDataModule(data_dir, batch_size=2, classification=True, augmentation=True)
+    dm = ShapenetCoreDataModule(data_dir, batch_size=2, classification=False, augmentation=True)
     test_loader = dm.test_dataloader()
     for i, batch in enumerate(test_loader):
         if i >= 1:
             break
-        points, labels = batch
+        points, labels, encoded_segments = batch
         print(f"Batch {i} points:", points.shape)
         print(f"Batch {i} labels:", labels.shape)
+        print(f"Batch {i} segments:", encoded_segments)
 
     print('Done')

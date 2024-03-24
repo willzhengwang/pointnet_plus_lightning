@@ -7,8 +7,11 @@ from typing import List, Optional
 import torch
 from torch import nn
 from torchmetrics.classification import Accuracy
-from torchmetrics.aggregation import MeanMetric, MaxMetric
+from torchmetrics.aggregation import MeanMetric, MaxMetric, CatMetric
 from lightning import LightningModule
+from src.utils import pylogger
+
+log = pylogger.get_pylogger(__name__)
 
 
 def square_distance(src: torch.Tensor, dst: torch.Tensor) -> torch.Tensor:
@@ -736,6 +739,12 @@ class PointNet2SegModule(LightningModule):
         self.val_loss = MeanMetric()
         self.test_loss = MeanMetric()
 
+        # for instance average IoU (intersection over union)
+        self.train_iou = MeanMetric()
+        self.val_iou = MeanMetric()
+        self.test_iou = MeanMetric()
+        self.test_ious = []
+
         # for tracking best so far validation accuracy
         self.val_acc_best = MaxMetric()
 
@@ -761,6 +770,7 @@ class PointNet2SegModule(LightningModule):
         self.val_loss.reset()
         self.val_acc.reset()
         self.val_acc_best.reset()
+        self.val_iou.reset()
 
     def forward(self, x):
         return self.net(x)
@@ -769,14 +779,30 @@ class PointNet2SegModule(LightningModule):
         """
         Forward + Loss + Predict a batch of data
         """
-        points, seg_labels = batch
+        points, seg_labels, encoded_segments = batch
         points = points.permute(0, 2, 1)  # (batch_size, 3+num_features, num_point)
         logits = self.forward(points)  # logits: batch_size * num_points * num_classes
+
+        # calculate instance IoU
+        preds = torch.argmax(logits, dim=-1)
+        instance_ious = []
+        for i in range(points.shape[0]):
+            # decode the segments. an encoded str of segments: '12,13,14,15'
+            segments = [int(s) for s in encoded_segments[i].split(',')]
+            for segment in segments:
+                total_union = torch.sum((preds[i] == segment) | (seg_labels[i] == segment))
+                if total_union == 0:
+                    instance_ious.append(1.0)
+                else:
+                    intersection = torch.sum((preds[i] == segment) & (seg_labels[i] == segment))
+                    instance_ious.append((intersection / total_union).item())
+
         logits = logits.reshape(-1, self.net.num_classes)
         labels = seg_labels.view(-1, 1)[:, 0]
         loss = self.criterion(logits, labels)
         preds = torch.argmax(logits, dim=1)
-        return loss, preds, labels
+
+        return loss, preds, labels, instance_ious
 
     def training_step(self, batch: tuple, batch_idx: int):
         """
@@ -786,14 +812,17 @@ class PointNet2SegModule(LightningModule):
         @param batch_idx: The index of the current batch.
         @return: A tensor of losses between model predictions and targets.
         """
-        loss, preds, labels = self.model_step(batch)
+        loss, preds, labels, ious = self.model_step(batch)
 
         # update and log metrics
         self.train_loss(loss)
         self.train_acc(preds, labels)
+        self.train_iou(torch.mean(torch.tensor(ious)))
+        self.test_ious.extend(ious)
 
         self.log("train/loss", self.train_loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log("train/acc", self.train_acc, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/iou", self.train_iou, on_step=False, on_epoch=True, prog_bar=True)
 
         return loss
 
@@ -801,26 +830,35 @@ class PointNet2SegModule(LightningModule):
         """
         Perform a single validation step on a batch of data from the validation set
         """
-        loss, preds, labels = self.model_step(batch)
+        loss, preds, labels, ious = self.model_step(batch)
 
         # update and log metrics
         self.val_loss(loss)
         self.val_acc(preds, labels)
+        self.val_iou(torch.mean(torch.tensor(ious)))
 
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/iou", self.val_iou, on_step=False, on_epoch=True, prog_bar=True)
 
     def test_step(self, batch, batch_idx):
         """
         Perform a single test step on a batch of data from the test set.
         """
-        loss, preds, labels = self.model_step(batch)
+        loss, preds, labels, ious = self.model_step(batch)
 
         # update and log metrics
         self.test_loss(loss)
         self.test_acc(preds, labels)
+        self.test_iou(torch.mean(torch.tensor(ious)))
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test/iou", self.test_iou, on_step=False, on_epoch=True, prog_bar=True)
+
+    def on_test_end(self) -> None:
+        # calculate instance average iou
+        ave_iou = torch.mean(torch.tensor(self.test_ious))
+        log.info("Final instance average iou on the test dataset: {:.2f}".format(ave_iou))
 
     def configure_optimizers(self):
         """
