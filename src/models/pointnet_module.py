@@ -183,6 +183,41 @@ class PointNetCls(nn.Module):
         return logits, trans_in, trans_feat
 
 
+class PointNetPartSeg(nn.Module):
+    """
+    PointNet for Part Segmentation
+    """
+    def __init__(self, num_classes, in_channels=3, feature_transform=False):
+        super().__init__()
+        self.num_classes = num_classes
+
+        self.feat_net = FeatureNet(in_channels=in_channels, classification=True, feature_transform=feature_transform)
+
+        self.mlp = nn.Sequential(
+            nn.Linear(1024 + 64, 512, bias=True),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+
+            nn.Linear(512, 256, bias=True),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+        )
+
+        self.out_conv = nn.Linear(128, )
+
+    def forward(self, x):
+        x, trans_in, trans_feat = self.feat_net(x)
+        # x: (batch_size, 1024, num_pts); trans_feat: (batch_size, 64, num_pts)
+        x = torch.cat([trans_feat, x], dim=1)
+        x = self.mlp(x)
+        logits = self.out_conv(x)  # (batch_size, num_classes)
+        return logits, trans_feat
+
+
 class PointNetClsModule(LightningModule):
     """
     PointNet Classifier - Lightning Module
