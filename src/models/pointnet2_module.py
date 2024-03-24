@@ -7,7 +7,7 @@ from typing import List, Optional
 import torch
 from torch import nn
 from torchmetrics.classification import Accuracy
-from torchmetrics.aggregation import MeanMetric, MaxMetric, CatMetric
+from torchmetrics.aggregation import MeanMetric, MaxMetric
 from lightning import LightningModule
 from src.utils import pylogger
 
@@ -705,9 +705,9 @@ class PointNet2ClsModule(LightningModule):
         return {'optimizer': optimizer}
 
 
-class PointNet2SegModule(LightningModule):
+class PointNet2PartSegModule(LightningModule):
     """
-    PointNet++ Segmentation - Lightning Module
+    Lightning Module of PointNet++ for Part Segmentation on Point Clouds
     """
     def __init__(self, net: nn.Module, optimizer: torch.optim.Optimizer, scheduler: torch.optim.lr_scheduler,
                  compile: bool = False):
@@ -741,7 +741,7 @@ class PointNet2SegModule(LightningModule):
         self.test_ious = []
 
         # for tracking best so far validation accuracy
-        self.val_acc_best = MaxMetric()
+        self.val_iou_best = MaxMetric()
 
     def setup(self, stage: str) -> None:
         """
@@ -763,8 +763,7 @@ class PointNet2SegModule(LightningModule):
         # by default lightning executes validation step sanity checks before training starts,
         # so it's worth to make sure validation metrics don't store results from these checks
         self.val_loss.reset()
-        self.val_acc.reset()
-        self.val_acc_best.reset()
+        self.val_iou_best.reset()
         self.val_iou.reset()
 
     def forward(self, x):
@@ -805,12 +804,11 @@ class PointNet2SegModule(LightningModule):
         @param batch_idx: The index of the current batch.
         @return: A tensor of losses between model predictions and targets.
         """
-        loss, ious = self.model_step(batch)
+        loss, instance_ious = self.model_step(batch)
 
         # update and log metrics
         self.train_loss(loss)
-        self.train_iou(torch.mean(torch.tensor(ious)))
-        self.test_ious.extend(ious)
+        self.train_iou(torch.mean(torch.tensor(instance_ious)))
 
         self.log("train/loss", self.train_loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log("train/iou", self.train_iou, on_step=True, on_epoch=True, prog_bar=True)
@@ -821,11 +819,11 @@ class PointNet2SegModule(LightningModule):
         """
         Perform a single validation step on a batch of data from the validation set
         """
-        loss, ious = self.model_step(batch)
+        loss, instance_ious = self.model_step(batch)
 
         # update and log metrics
         self.val_loss(loss)
-        self.val_iou(torch.mean(torch.tensor(ious)))
+        self.val_iou(torch.mean(torch.tensor(instance_ious)))
 
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/iou", self.val_iou, on_step=False, on_epoch=True, prog_bar=True)
@@ -834,11 +832,13 @@ class PointNet2SegModule(LightningModule):
         """
         Perform a single test step on a batch of data from the test set.
         """
-        loss, ious = self.model_step(batch)
+        loss, instance_ious = self.model_step(batch)
 
         # update and log metrics
         self.test_loss(loss)
-        self.test_iou(torch.mean(torch.tensor(ious)))
+        self.test_iou(torch.mean(torch.tensor(instance_ious)))
+        self.test_ious.extend(instance_ious)
+
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test/iou", self.test_iou, on_step=False, on_epoch=True, prog_bar=True)
 

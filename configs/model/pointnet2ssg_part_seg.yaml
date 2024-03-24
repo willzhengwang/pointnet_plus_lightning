@@ -1,4 +1,4 @@
-_target_: src.models.pointnet2_module.PointNet2SegModule
+_target_: src.models.pointnet2_module.PointNet2PartSegModule
 
 optimizer:
   _target_: torch.optim.Adam
