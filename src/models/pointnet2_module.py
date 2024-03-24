@@ -566,6 +566,69 @@ class PointNet2SSGPartSeg(nn.Module):
         return x
 
 
+class PointNet2SSGSemSeg(nn.Module):
+    """
+    PointNet++ with SSG (single-scale grouping) for Semantic Segmentation on point clouds
+    """
+    def __init__(self, num_classes: int, with_normals=True):
+        super().__init__()
+
+        self.num_classes = num_classes
+        self.with_normals = with_normals
+        in_channels = 6 if with_normals else 3
+        self.sa1 = PointNetSetAbstraction(512, 0.2, 32, in_channels,
+                                          [64, 64, 128], False)
+        self.sa2 = PointNetSetAbstraction(128, 0.4, 64, 128 + 3,
+                                          [128, 128, 256], False)
+        # sa3 group all into one centroid
+        self.sa3 = PointNetSetAbstraction(None, None, None, 256 + 3,
+                                          [256, 512, 1024], True)
+
+        self.fp3 = PointNetFeaturePropagation(256 + 1024, [256, 256])
+        self.fp2 = PointNetFeaturePropagation(128 + 256, [256, 128])
+
+        # in fp1, the in_channels: 3*2: dimension_of_coords + dimension_of_normals. This is different from
+        # https://github.com/yanx27/Pointnet_Pointnet2_pytorch/blob/master/models/pointnet2_part_seg_ssg.py
+        self.fp1 = PointNetFeaturePropagation(128 + 3 + 3, [128, 128, 128])
+        # FC layers for segmentation
+        self.fc1 = nn.Sequential(
+            nn.Conv1d(128, 128, 1),  # bias can be set as False as it's followed by a BN
+            nn.BatchNorm1d(128),
+            nn.Dropout(p=0.5),
+        )
+        self.conv = nn.Conv1d(128, num_classes, 1)
+
+    def forward(self, points: torch.Tensor):
+        """
+        @param points: [batch_size, num_channels, num_points] of point clouds.
+        The first 3 channels are (x, y, z) coordinates. The later are features such as normals.
+        # @param seg_labels: [batch_size, 1, num_points] segmentation labels
+        @return:
+        """
+        B, _, N = points.shape
+        l0_xyz = points[:, :3, :]
+        if self.with_normals and points.shape[1] > 3:
+            l0_features = points[:, 3:, :]
+        else:
+            l0_features = None
+        l1_xyz, l1_features = self.sa1(l0_xyz, l0_features)
+        l2_xyz, l2_features = self.sa2(l1_xyz, l1_features)
+        l3_xyz, l3_features = self.sa3(l2_xyz, l2_features)
+
+        # Feature propagation
+        l2_features = self.fp3(l2_xyz, l3_xyz, l2_features, l3_features)
+        l1_features = self.fp2(l1_xyz, l2_xyz, l1_features, l2_features)
+
+        # The seg_labels are used as features and concatenated with coords and normals in the implementation:
+        # https://github.com/yanx27/Pointnet_Pointnet2_pytorch/blob/master/models/pointnet2_part_seg_ssg.py
+        l0_features = self.fp1(l0_xyz, l1_xyz, torch.cat([l0_xyz, l0_features], dim=1), l1_features)
+
+        x = self.fc1(l0_features)
+        x = self.conv(x)
+        x = x.permute(0, 2, 1)  # logits, use entropy_loss
+        return x
+
+
 class PointNet2ClsModule(LightningModule):
     """
     PointNet++ classification - Lightning Module
