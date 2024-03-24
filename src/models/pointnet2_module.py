@@ -9,8 +9,8 @@ from torch import nn
 from torchmetrics.classification import Accuracy
 from torchmetrics.aggregation import MeanMetric, MaxMetric
 from lightning import LightningModule
-from src.utils import pylogger
 
+from src.utils import pylogger
 log = pylogger.get_pylogger(__name__)
 
 

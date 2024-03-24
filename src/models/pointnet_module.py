@@ -6,6 +6,9 @@ from torchmetrics.classification.accuracy import Accuracy
 from torchmetrics import MeanMetric, MaxMetric
 from lightning import LightningModule
 
+from src.utils import pylogger
+log = pylogger.get_pylogger(__name__)
+
 
 class TNet(nn.Module):
     """
@@ -296,7 +299,7 @@ class PointNetClsModule(LightningModule):
 
         loss = self.criterion(logits, labels)
         if trans_feat is not None:
-            loss += regularize_feat_transform(trans_feat)
+            loss += regularize_feat_transform(trans_feat, reg_scale=0.001)
 
         preds = torch.argmax(logits, dim=1)  # (batch_size, num_classes)
         # update and log metrics
@@ -369,6 +372,172 @@ class PointNetClsModule(LightningModule):
                 },
             }
         return {"optimizer": optimizer}
+
+
+class PointNetPartSegModule(LightningModule):
+    """
+    Lightning Module of PointNet for Part Segmentation on Point Clouds
+    """
+    def __init__(self, net: nn.Module, optimizer: torch.optim.Optimizer, scheduler: torch.optim.lr_scheduler,
+                 compile: bool = False):
+        """
+        Init function of the LightningModule
+        @param net: The model to train. Either PointNet2MSGCls or PointNet2SSGCls.
+        @param optimizer: The optimizer to use for training.
+        @param scheduler: The learning rate scheduler to use for training.
+        @param compile: True - compile model for faster training with pytorch 2.0.
+        """
+        super().__init__()
+
+        # This line allows to access init params with 'self.hparams' attribute
+        # also ensures init params will be stored in ckpt.
+        # logger=True: send the hyperparameters to the logger.
+        self.save_hyperparameters(logger=False)
+
+        self.net = net
+
+        self.criterion = nn.CrossEntropyLoss()
+
+        # for averaging loss across batches
+        self.train_loss = MeanMetric()
+        self.val_loss = MeanMetric()
+        self.test_loss = MeanMetric()
+
+        # for instance average IoU (intersection over union)
+        self.train_iou = MeanMetric()
+        self.val_iou = MeanMetric()
+        self.test_iou = MeanMetric()
+        self.test_ious = []
+
+        # for tracking best so far validation accuracy
+        self.val_iou_best = MaxMetric()
+
+    def setup(self, stage: str) -> None:
+        """
+        Lightning hook that is called at the beginning of fit (train + validate),
+        validate, test, or predict.
+
+        This is a good hook when you need to build models dynamically or adjust something about
+        them. This hook is called on every process when using DDP.
+
+        @param stage: Either `"fit"`, `"validate"`, `"test"`, or `"predict"`.
+        """
+        if self.hparams.compile and stage == "fit":
+            self.net = torch.compile(self.net)
+
+    def on_train_start(self) -> None:
+        """
+        Lightning hook that is called when training begins
+        """
+        # by default lightning executes validation step sanity checks before training starts,
+        # so it's worth to make sure validation metrics don't store results from these checks
+        self.val_loss.reset()
+        self.val_iou_best.reset()
+        self.val_iou.reset()
+
+    def forward(self, x):
+        return self.net(x)
+
+    def model_step(self, batch):
+        """
+        Forward + Loss + Predict a batch of data
+        """
+        points, seg_labels, encoded_segments = batch
+        points = points.permute(0, 2, 1)  # (batch_size, 3+num_features, num_point)
+        logits, trans_feat = self.forward(points)  # logits: batch_size * num_points * num_classes
+
+        # calculate instance IoU
+        preds = torch.argmax(logits, dim=-1)
+        instance_ious = []
+        for i in range(points.shape[0]):
+            # decode the segments. an encoded str of segments: '12,13,14,15'
+            segments = [int(s) for s in encoded_segments[i].split(',')]
+            for segment in segments:
+                total_union = torch.sum((preds[i] == segment) | (seg_labels[i] == segment))
+                if total_union == 0:
+                    instance_ious.append(1.0)
+                else:
+                    intersection = torch.sum((preds[i] == segment) & (seg_labels[i] == segment))
+                    instance_ious.append((intersection / total_union).item())
+
+        logits = logits.reshape(-1, self.net.num_classes)
+        labels = seg_labels.view(-1, 1)[:, 0]
+        loss = self.criterion(logits, labels)
+
+        # It's reported by others, the feature transformation seems not to improve the performance.
+        if trans_feat is not None:
+            loss += regularize_feat_transform(trans_feat, reg_scale=0.001)
+        return loss, instance_ious
+
+    def training_step(self, batch: tuple, batch_idx: int):
+        """
+        Perform a single training step on a batch of data from the training set.
+
+        @param batch: A batch of data (a tuple) containing the input tensor of images and target labels.
+        @param batch_idx: The index of the current batch.
+        @return: A tensor of losses between model predictions and targets.
+        """
+        loss, instance_ious = self.model_step(batch)
+
+        # update and log metrics
+        self.train_loss(loss)
+        self.train_iou(torch.mean(torch.tensor(instance_ious)))
+
+        self.log("train/loss", self.train_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/iou", self.train_iou, on_step=True, on_epoch=True, prog_bar=True)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        """
+        Perform a single validation step on a batch of data from the validation set
+        """
+        loss, instance_ious = self.model_step(batch)
+
+        # update and log metrics
+        self.val_loss(loss)
+        self.val_iou(torch.mean(torch.tensor(instance_ious)))
+
+        self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/iou", self.val_iou, on_step=False, on_epoch=True, prog_bar=True)
+
+    def test_step(self, batch, batch_idx):
+        """
+        Perform a single test step on a batch of data from the test set.
+        """
+        loss, instance_ious = self.model_step(batch)
+
+        # update and log metrics
+        self.test_loss(loss)
+        self.test_iou(torch.mean(torch.tensor(instance_ious)))
+        self.test_ious.extend(instance_ious)
+
+        self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test/iou", self.test_iou, on_step=False, on_epoch=True, prog_bar=True)
+
+    def on_test_end(self) -> None:
+        # calculate instance average iou
+        ave_iou = torch.mean(torch.tensor(self.test_ious))
+        log.info("Final instance average iou on the test dataset: {:.2f}".format(ave_iou))
+
+    def configure_optimizers(self):
+        """
+        Choose what optimizers and learning-rate schedulers to use in your optimization.
+        Normally you'd need one. But in the case of GANs or similar you might have multiple.
+
+        @return: A dict containing the configured optimizers and learning-rate schedulers to be used for training.
+        """
+        optimizer = self.hparams.optimizer(params=self.parameters())
+        if self.hparams.scheduler is not None:
+            scheduler = self.hparams.scheduler(optimizer=optimizer)
+            return {
+                'optimizer': optimizer,
+                'lr_scheduler': scheduler,
+                'monitor': 'val/loss',
+                'interval': 'epoch',
+                'frequency': 1,
+            }
+        return {'optimizer': optimizer}
 
 
 if __name__ == '__main__':
