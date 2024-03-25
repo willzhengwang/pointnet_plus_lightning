@@ -45,21 +45,62 @@ Download the [ModelNet40](https://shapenet.cs.stanford.edu/media/modelnet40_norm
 
 ### PointNet
 
-The main PointNet network is illustrated in the following figure. 
 
+The architecture of PointNet network is illustrated in the following figure. 
+It's actually taken from the PointNet paper [1], and I just added a few notes for interpretation.
 
+<figure>
+    <img src="readme_files/pointnet_main.png" alt="PointNet main structure" width="60%">
+    <figcaption> Pointnet architecture.</figcaption>
+</figure>
 
+TNet is a component in the PointNet backbone for input xyz transformation and (optionally) feature transformation. 
+
+<figure>
+    <img src="readme_files/pointnet-TNet.jpg" alt="PointNet TNet" width="60%">
+    <figcaption> Architecture of the TNet. </figcaption>
+</figure>
+
+PointFeat is another component in the PointNet backbone network for extracting features. The original paper did not name this network, it's just named by myself.
+
+<figure>
+    <img src="readme_files/pointnet-PointFeat.jpg" alt="PointNet TNet" width="60%">
+    <figcaption> Architecture of the PointFeat network. </figcaption>
+</figure>
 
 ### PointNet++
 
+**Research problems**:
 
+- **PointNet does not capture local structures** induced by the metric space points live in, limiting its ability to recognize fine-grained patterns and generalizability to complex scenes. 
+The basic idea of PointNet is to learn a spatial encoding of each point and then aggregate all individual point features to a global point cloud signature.
+- Non-uniform point sampling issue: Features learned in dense data may not generalize to sparsely sampled regions. 
+Consequently, models trained for sparse point clouds may not recognize fine-grained local structures.
+
+**Solution**
+
+- PointNet++ builds a hierarchical grouping of points and progressively abstracts larger and larger local regions along the hierarchy. 
+The set abstraction level comprises three key layers: a **Sampling**, a **Grouping,** and a **PointNet layer**.
+    - Sampling method: Farthest point sampling (FPS) is used for sampling. 
+    - Grouping: Ball query.
+
+- The hierarchical feature learning in PointNet++ is very similar to CNN in 2D image analysis. 
+
+**Implementation**
+
+There are two versions of the PointNet++ implementation in the repo: Multi-Scale Grouping (MSG) and Multi-Scale Grouping (SSG). 
+The files and classes are named with Pointnet2msg or Pointnet2ssg.
+
+
+<figure>
+    <img src="readme_files/point2_architecture.png" alt="PointNet++ Architecture" width="75%">
+    <figcaption> Architecture of the PointNet++ network. </figcaption>
+</figure>
 
 ## Installation
 
-I recommend to use pip to create a virtual environment. I tried to. 
-Both Anaconda and 
-The environment can be created with Anaconda and `pip` virtual environment. 
-Personally, I think `pip` seems to be 
+I recommend to use `pip` to create a virtual environment for running the code. 
+I managed to use both Anaconda and the built-in python pip to create an env, but pip venv seems to be more efficient in solving the env compatibility in this case.  
 
 #### Pip
 
@@ -68,7 +109,7 @@ Personally, I think `pip` seems to be
 git clone https://github.com/willzhengwang/pointnet_plus_lightning.git
 cd pointnet_plus_lightning
 
-# [OPTIONAL] create a virtual environment with python=3.8 (or after. I used python 3.8.)
+# [OPTIONAL] create a virtual environment with python=3.8 (or after). I created a venv with pycharm IDE.
 
 # Install a certain pytorch version according to instructions
 # https://pytorch.org/get-started/
@@ -91,28 +132,33 @@ python src/train.py trainer=cpu
 python src/train.py trainer=gpu
 ```
 
-Train model with chosen experiment configuration from [configs/experiment/](configs/experiment/)
-
-```bash
-python src/train.py experiment=experiment_name.yaml
-```
-
 You can override any parameter from command line like this
 
 ```bash
-python src/train.py trainer.max_epochs=20 data.batch_size=64
+python src/train.py trainer.max_epochs=20 data.batch_size=16 
 ```
+
+
+## Acknowledgements
+
+I would like to express my sincere appreciation to the authors of the following GitHub repositories and YouTube video. 
+Your contributions have been invaluable in helping me understand the papers and the implementations.
+Thank you for your hard work and commitment to the community.
+
+- Github Repo: [yanx27/Pointnet_Pointnet2_pytorch](https://github.com/yanx27/Pointnet_Pointnet2_pytorch)
+
+- Github Repo: [fxia22/pointnet.pytorch](https://github.com/fxia22/pointnet.pytorch) <br>
+
+- Youtube video: [PointNet++ - Pytorch Implementation and Code Explanation](https://www.youtube.com/watch?v=VupEDNvfwZI) (in Chinese)
+
 
 ## References
 
-Github Repo: [yanx27/Pointnet_Pointnet2_pytorch](https://github.com/yanx27/Pointnet_Pointnet2_pytorch)
-
-Github Repo: [fxia22/pointnet.pytorch](https://github.com/fxia22/pointnet.pytorch) <br>
-
-Qi, C.R., Su, H., Mo, K. and Guibas, L.J., 2017. 
+[1] Qi, C.R., Su, H., Mo, K. and Guibas, L.J., 2017. 
 Pointnet: Deep learning on point sets for 3d classification and segmentation. 
 In Proceedings of the IEEE conference on computer vision and pattern recognition (pp. 652-660).
 
-Qi CR, Yi L, Su H, Guibas LJ. 
+[2] Qi CR, Yi L, Su H, Guibas LJ. 
 Pointnet++: Deep hierarchical feature learning on point sets in a metric space. 
 Advances in neural information processing systems. 2017;30.
+
