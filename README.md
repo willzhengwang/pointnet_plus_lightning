@@ -50,21 +50,21 @@ The architecture of PointNet network is illustrated in the following figure.
 It's actually taken from the PointNet paper [1], and I just added a few notes for interpretation.
 
 <figure>
-    <img src="readme_files/pointnet_main.png" alt="PointNet main structure" width="60%">
+    <img src="readme_files/pointnet_main.png" alt="PointNet main structure" width="100%">
     <figcaption> Pointnet architecture.</figcaption>
 </figure>
 
 TNet is a component in the PointNet backbone for input xyz transformation and (optionally) feature transformation. 
 
 <figure>
-    <img src="readme_files/pointnet-TNet.jpg" alt="PointNet TNet" width="60%">
+    <img src="readme_files/pointnet-TNet.jpg" alt="PointNet TNet" width="90%">
     <figcaption> Architecture of the TNet. </figcaption>
 </figure>
 
 PointFeat is another component in the PointNet backbone network for extracting features. The original paper did not name this network, it's just named by myself.
 
 <figure>
-    <img src="readme_files/pointnet-PointFeat.jpg" alt="PointNet TNet" width="60%">
+    <img src="readme_files/pointnet-PointFeat.jpg" alt="PointNet TNet" width="90%">
     <figcaption> Architecture of the PointFeat network. </figcaption>
 </figure>
 
@@ -93,7 +93,7 @@ The files and classes are named with Pointnet2msg or Pointnet2ssg.
 
 
 <figure>
-    <img src="readme_files/point2_architecture.png" alt="PointNet++ Architecture" width="75%">
+    <img src="readme_files/point2_architecture.png" alt="PointNet++ Architecture" width="100%">
     <figcaption> Architecture of the PointNet++ network. </figcaption>
 </figure>
 
