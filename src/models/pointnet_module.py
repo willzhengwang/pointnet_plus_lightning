@@ -95,7 +95,7 @@ class FeatureNet(nn.Module):
             self.tnet_in = TNet(3)
 
         self.conv1 = nn.Sequential(
-            nn.Conv1d(3, 64, kernel_size=1, bias=False),
+            nn.Conv1d(in_channels, 64, kernel_size=1, bias=False),
             nn.BatchNorm1d(64),
             nn.ReLU()
         )

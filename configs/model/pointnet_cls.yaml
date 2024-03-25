@@ -21,6 +21,7 @@ scheduler:
 net:
   _target_: src.models.pointnet_module.PointNetCls
   num_classes: 16
+  in_channels: 6
 
 # compile model for faster training with pytorch 2.0
 compile: false
