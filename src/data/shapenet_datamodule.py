@@ -211,14 +211,24 @@ class ShapenetCoreDataModule(LightningDataModule):
 
 if __name__ == '__main__':
     data_dir = 'data/shapenetcore_normals'
+
+    dm = ShapenetCoreDataModule(data_dir, batch_size=2, classification=True, augmentation=True)
+    test_loader = dm.test_dataloader()
+    for i, batch in enumerate(test_loader):
+        if i >= 1:
+            break
+        points, labels = batch
+        print(f"Classification - Batch {i} points:", points.shape)
+        print(f"Classification - Batch {i} labels:", labels.shape)
+
     dm = ShapenetCoreDataModule(data_dir, batch_size=2, classification=False, augmentation=True)
     test_loader = dm.test_dataloader()
     for i, batch in enumerate(test_loader):
         if i >= 1:
             break
         points, labels, encoded_segments = batch
-        print(f"Batch {i} points:", points.shape)
-        print(f"Batch {i} labels:", labels.shape)
-        print(f"Batch {i} segments:", encoded_segments)
+        print(f"Segmentation - Batch {i} points:", points.shape)
+        print(f"Segmentation - Batch {i} labels:", labels.shape)
+        print(f"Segmentation - Batch {i} segments:", encoded_segments)
 
     print('Done')
