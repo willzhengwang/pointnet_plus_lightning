@@ -566,30 +566,42 @@ class PointNet2SSGPartSeg(nn.Module):
         return x
 
 
-class PointNet2SSGSemSeg(nn.Module):
+class PointNet2MSGPartSeg(nn.Module):
     """
-    PointNet++ with SSG (single-scale grouping) for Semantic Segmentation on point clouds
+    PointNet++ with MSG (multi-scale grouping) for Part Segmentation
     """
-    def __init__(self, num_classes: int, with_normals=True):
+    def __init__(self, num_classes: int, with_normals: bool = True):
+        """
+        @param num_classes: number of classes
+        @param with_normals: Ture - point clouds have coordinates + normals.
+                             False - point clouds have coordinates only.
+        """
         super().__init__()
-
+        in_channels = 6 if with_normals else 3
         self.num_classes = num_classes
         self.with_normals = with_normals
-        in_channels = 6 if with_normals else 3
-        self.sa1 = PointNetSetAbstraction(512, 0.2, 32, in_channels,
-                                          [64, 64, 128], False)
-        self.sa2 = PointNetSetAbstraction(128, 0.4, 64, 128 + 3,
-                                          [128, 128, 256], False)
-        # sa3 group all into one centroid
-        self.sa3 = PointNetSetAbstraction(None, None, None, 256 + 3,
+        # Note that the change trend of num_centroids, radius, num_samples, and mlp_channels is very similar to CNN on
+        # images. Basically, the depth (number of channels) increases with the increase of receptive field, and with
+        # the decrease of the spatial resolution (number of centroids).
+        self.sa1 = PointNetSetAbstractionMSG(512,
+                                             [0.1, 0.2, 0.4],
+                                             [32, 64, 128],
+                                             in_channels,
+                                             [[32, 32, 64], [64, 64, 128], [64, 96, 128]])
+        self.sa2 = PointNetSetAbstractionMSG(128,
+                                             [0.4, 0.8],
+                                             [64, 128],
+                                             320 + 3,  # 64+128+128=320
+                                             [[128, 128, 256], [128, 196, 256]])
+        self.sa3 = PointNetSetAbstraction(None, None, None,
+                                          512 + 3,  # 256+256=512
                                           [256, 512, 1024], True)
 
-        self.fp3 = PointNetFeaturePropagation(256 + 1024, [256, 256])
-        self.fp2 = PointNetFeaturePropagation(128 + 256, [256, 128])
+        self.fp3 = PointNetFeaturePropagation(256 + 256 + 1024, [256, 256])
+        self.fp2 = PointNetFeaturePropagation(64 + 128 + 128 + 256, [256, 128])
 
-        # in fp1, the in_channels: 3*2: dimension_of_coords + dimension_of_normals. This is different from
-        # https://github.com/yanx27/Pointnet_Pointnet2_pytorch/blob/master/models/pointnet2_part_seg_ssg.py
-        self.fp1 = PointNetFeaturePropagation(128 + 3 + 3, [128, 128, 128])
+        self.fp1 = PointNetFeaturePropagation(128 + 3 + 3, [128, 128])
+
         # FC layers for segmentation
         self.fc1 = nn.Sequential(
             nn.Conv1d(128, 128, 1),  # bias can be set as False as it's followed by a BN
@@ -598,34 +610,31 @@ class PointNet2SSGSemSeg(nn.Module):
         )
         self.conv = nn.Conv1d(128, num_classes, 1)
 
-    def forward(self, points: torch.Tensor):
+    def forward(self, points):
         """
         @param points: [batch_size, num_channels, num_points] of point clouds.
         The first 3 channels are (x, y, z) coordinates. The later are features such as normals.
-        # @param seg_labels: [batch_size, 1, num_points] segmentation labels
         @return:
         """
-        B, _, N = points.shape
+        B, _, _ = points.shape
         l0_xyz = points[:, :3, :]
         if self.with_normals and points.shape[1] > 3:
-            l0_features = points[:, 3:, :]
+            l0_features = points[:, 3:, :]  # normals
         else:
             l0_features = None
-        l1_xyz, l1_features = self.sa1(l0_xyz, l0_features)
-        l2_xyz, l2_features = self.sa2(l1_xyz, l1_features)
-        l3_xyz, l3_features = self.sa3(l2_xyz, l2_features)
+        l1_xyz, l1_features = self.sa1(l0_xyz, l0_features)  # l1_features: B, (64+128+128)=320, num_centroids=512
+        l2_xyz, l2_features = self.sa2(l1_xyz, l1_features)  # l2_features: B, (256+256)=512, num_centroids=128
+        l3_xyz, l3_features = self.sa3(l2_xyz, l2_features)  # l3_features: B, 1024, num_centroids=1
 
-        # Feature propagation
-        l2_features = self.fp3(l2_xyz, l3_xyz, l2_features, l3_features)
-        l1_features = self.fp2(l1_xyz, l2_xyz, l1_features, l2_features)
-
-        # The seg_labels are used as features and concatenated with coords and normals in the implementation:
-        # https://github.com/yanx27/Pointnet_Pointnet2_pytorch/blob/master/models/pointnet2_part_seg_ssg.py
+        # Feature Propagation layers
+        l2_features = self.fp3(l2_xyz, l3_xyz, l2_features, l3_features)  # l2_features: B, 256, num_centroids=128
+        l1_features = self.fp2(l1_xyz, l2_xyz, l1_features, l2_features)  # l1_features: B, 128, num_centroids=512
         l0_features = self.fp1(l0_xyz, l1_xyz, torch.cat([l0_xyz, l0_features], dim=1), l1_features)
 
         x = self.fc1(l0_features)
-        x = self.conv(x)
-        x = x.permute(0, 2, 1)  # logits, use entropy_loss
+        x = self.conv(x)  # x == logits, use entropy_loss
+        # x = nn.functional.log_softmax(x, -1)  # use nll_loss
+        x = x.permute(0, 2, 1)
         return x
 
 
