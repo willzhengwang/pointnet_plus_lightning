@@ -109,7 +109,7 @@ I managed to use both Anaconda and the built-in python pip to create an env, but
 git clone https://github.com/willzhengwang/pointnet_plus_lightning.git
 cd pointnet_plus_lightning
 
-# [OPTIONAL] create a virtual environment with python=3.8 (or after). I created a venv with pycharm IDE.
+# [OPTIONAL] create a virtual environment with python=3.8 (or after). My venv was created in the pycharm IDE.
 
 # Install a certain pytorch version according to instructions
 # https://pytorch.org/get-started/
@@ -117,8 +117,6 @@ cd pointnet_plus_lightning
 # install requirements
 pip install -r requirements.txt
 ```
-
-(Personal experience: `pip` seems it seems to be easier )
 
 ## How to run
 
