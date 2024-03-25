@@ -25,28 +25,28 @@ class TNet(nn.Module):
         super().__init__()
         self.k = k
         self.conv1 = nn.Sequential(
-            nn.Conv1d(k, 64, kernel_size=1, bias=True),
+            nn.Conv1d(k, 64, kernel_size=1, bias=False),
             nn.BatchNorm1d(64),
             nn.ReLU()
         )
         self.conv2 = nn.Sequential(
-            nn.Conv1d(64, 128, kernel_size=1, bias=True),
+            nn.Conv1d(64, 128, kernel_size=1, bias=False),
             nn.BatchNorm1d(128),
             nn.ReLU()
         )
         self.conv3 = nn.Sequential(
-            nn.Conv1d(128, 1024, kernel_size=1, bias=True),
+            nn.Conv1d(128, 1024, kernel_size=1, bias=False),
             nn.BatchNorm1d(1024),
             nn.ReLU()
         )
         # max(x, 2) + view(-1, 1024)
         self.fc1 = nn.Sequential(
-            nn.Linear(1024, 512, bias=True),
+            nn.Linear(1024, 512, bias=False),
             nn.BatchNorm1d(512),
             nn.ReLU()
         )
         self.fc2 = nn.Sequential(
-            nn.Linear(512, 256, bias=True),
+            nn.Linear(512, 256, bias=False),
             nn.BatchNorm1d(256),
             nn.ReLU()
         )
@@ -95,17 +95,17 @@ class FeatureNet(nn.Module):
             self.tnet_in = TNet(3)
 
         self.conv1 = nn.Sequential(
-            nn.Conv1d(3, 64, kernel_size=1, bias=True),
+            nn.Conv1d(3, 64, kernel_size=1, bias=False),
             nn.BatchNorm1d(64),
             nn.ReLU()
         )
         if feature_transform:
             self.tnet64 = TNet(64)
         self.mlp = nn.Sequential(
-            nn.Conv1d(64, 128, kernel_size=1, bias=True),
+            nn.Conv1d(64, 128, kernel_size=1, bias=False),
             nn.BatchNorm1d(128),
             nn.ReLU(),
-            nn.Conv1d(128, 1024, kernel_size=1, bias=True),
+            nn.Conv1d(128, 1024, kernel_size=1, bias=False),
             nn.BatchNorm1d(1024),
             nn.ReLU(),
         )
@@ -168,11 +168,11 @@ class PointNetCls(nn.Module):
 
         self.feat_net = FeatureNet(in_channels=in_channels, classification=True, feature_transform=feature_transform)
         self.mlp = nn.Sequential(
-            nn.Linear(1024, 512, bias=True),
+            nn.Linear(1024, 512, bias=False),
             nn.BatchNorm1d(512),
             nn.ReLU(),
 
-            nn.Linear(512, 256, bias=True),
+            nn.Linear(512, 256, bias=False),
             nn.Dropout(p=0.3),
             nn.BatchNorm1d(256),
             nn.ReLU(),
@@ -197,11 +197,11 @@ class PointNetPartSeg(nn.Module):
         self.feat_net = FeatureNet(in_channels=in_channels, classification=True, feature_transform=feature_transform)
 
         self.mlp = nn.Sequential(
-            nn.Linear(1024 + 64, 512, bias=True),
+            nn.Linear(1024 + 64, 512, bias=False),
             nn.BatchNorm1d(512),
             nn.ReLU(),
 
-            nn.Linear(512, 256, bias=True),
+            nn.Linear(512, 256, bias=False),
             nn.BatchNorm1d(256),
             nn.ReLU(),
 

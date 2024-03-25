@@ -339,7 +339,7 @@ class PointNetFeaturePropagation(nn.Module):
         for out_channels in mlp_channels:
             self.mlp.append(
                 nn.Sequential(
-                    nn.Conv1d(in_channels, out_channels, 1),
+                    nn.Conv1d(in_channels, out_channels, 1, bias=True),
                     nn.BatchNorm1d(out_channels),
                     nn.ReLU(),
                 )
@@ -529,7 +529,7 @@ class PointNet2SSGPartSeg(nn.Module):
         self.fp1 = PointNetFeaturePropagation(128 + 3 + 3, [128, 128, 128])
         # FC layers for segmentation
         self.fc1 = nn.Sequential(
-            nn.Conv1d(128, 128, 1),  # bias can be set as False as it's followed by a BN
+            nn.Conv1d(128, 128, 1, bias=True),  # bias can be set as False as it's followed by a BN
             nn.BatchNorm1d(128),
             nn.Dropout(p=0.5),
         )
@@ -604,7 +604,7 @@ class PointNet2MSGPartSeg(nn.Module):
 
         # FC layers for segmentation
         self.fc1 = nn.Sequential(
-            nn.Conv1d(128, 128, 1),  # bias can be set as False as it's followed by a BN
+            nn.Conv1d(128, 128, 1, bias=True),  # bias can be set as False as it's followed by a BN
             nn.BatchNorm1d(128),
             nn.Dropout(p=0.5),
         )
