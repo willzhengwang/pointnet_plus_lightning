@@ -120,7 +120,7 @@ pip install -r requirements.txt
 
 ## How to run
 
-Train model with default configuration
+Train model with default configuration - PointNet classification with the ShapeNet core dataset:
 
 ```bash
 # train on CPU
@@ -130,10 +130,13 @@ python src/train.py trainer=cpu
 python src/train.py trainer=gpu
 ```
 
-You can override any parameter from command line like this
+You can override any parameter from command line like the follows
 
 ```bash
-python src/train.py trainer.max_epochs=20 data.batch_size=16 
+python src\train.py trainer=gpu trainer.max_epochs=60 data=shapenet_cls data.batch_size=32 model=pointnet_cls model.optimizer.lr=0.001
+
+python src\train.py trainer=gpu trainer.max_epochs=60 data=shapenet_seg data.batch_size=16 model=pointnet2ssg_part_seg callbacks.model_checkpoint.monitor="val/iou" callbacks.early_stopping.monitor="val/iou"
+
 ```
 
 
