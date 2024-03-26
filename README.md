@@ -139,6 +139,39 @@ python src\train.py trainer=gpu trainer.max_epochs=60 data=shapenet_seg data.bat
 
 ```
 
+## Evaluation
+
+The models are utilized for classification tasks on ShapeNet and Modelnet40, as well as for part segmentation on ShapeNet. 
+The subsequent sections provide an overview of the models' performance. 
+It should be noted that I have not optimized the hyperparameters, and there is room for improvement in this regard.
+If the hyperparameters are tuned properly, we anticipate that the performance ranking would be as follows: PointNet++ MSG > PointNet++ SSG > PointNet.
+
+### Classification on ShapeNet Core Dataset (coordinates with normals)
+
+| Network        | Accuracy | Script                                                                                                            |
+|----------------|----------|-------------------------------------------------------------------------------------------------------------------|
+| PointNet       | 98.2%    | python src\train.py trainer=gpu trainer.max_epochs=60 data=shapenet_cls data.batch_size=32 model=pointnet_cls     |
+| PointNet++ SSG | 98.1%    | python src\train.py trainer=gpu trainer.max_epochs=60 data=shapenet_cls data.batch_size=16 model=pointnet2ssg_cls |
+| PointNet++ MSG | tbd %    | python src\train.py trainer=gpu trainer.max_epochs=60 data=shapenet_cls data.batch_size=16 model=pointnet2msg_cls |
+
+### Classification on Modelnet40 Dataset (coordinates with normals)
+
+| Network        | Accuracy | Script                                                                                                            |
+|----------------|----------|-------------------------------------------------------------------------------------------------------------------|
+| PointNet       | 91.3%    | python src\train.py trainer=gpu trainer.max_epochs=60 data=modelnet_cls data.batch_size=16 model=pointnet_cls     |
+| PointNet++ SSG | tbd %    | python src\train.py trainer=gpu trainer.max_epochs=60 data=modelnet_cls data.batch_size=16 model=pointnet2ssg_cls |
+
+### Part Segmentation on ShapeNet Core Dataset (coordinates with normals)
+
+| Network        | Instance ave IoUs | Script                                                                                                            |
+|----------------|-------------------|-------------------------------------------------------------------------------------------------------------------|
+| PointNet       | tbd %             | python src\train.py trainer=gpu trainer.max_epochs=60 data=shapenet_seg data.batch_size=32 model=pointnet_part_seg callbacks.model_checkpoint.monitor="val/iou" callbacks.early_stopping.monitor="val/iou"
+      |
+| PointNet++ SSG | tbd %             | python src\train.py trainer=gpu trainer.max_epochs=60 data=shapenet_seg data.batch_size=16 model=pointnet2ssg_part_seg callbacks.model_checkpoint.monitor="val/iou" callbacks.early_stopping.monitor="val/iou"
+ |
+| PointNet++ MSG | tbd %             | python src\train.py trainer=gpu trainer.max_epochs=60 data=shapenet_seg data.batch_size=16 model=pointnet2msg_part_seg callbacks.model_checkpoint.monitor="val/iou" callbacks.early_stopping.monitor="val/iou"
+ |
+
 
 ## Acknowledgements
 
