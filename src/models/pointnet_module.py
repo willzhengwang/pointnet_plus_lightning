@@ -139,7 +139,8 @@ class FeatureNet(nn.Module):
         if self.classification:
             return global_feat, trans_in, trans_feat
         # segmentation
-        return torch.cat([point_feat, global_feat], dim=1), trans_in, trans_feat
+        return torch.cat([point_feat, global_feat.unsqueeze(-1).repeat(1, 1, point_feat.shape[-1])], dim=1), \
+               trans_in, trans_feat
 
 
 def regularize_feat_transform(feat_trans, reg_scale=0.001):
@@ -194,30 +195,29 @@ class PointNetPartSeg(nn.Module):
         super().__init__()
         self.num_classes = num_classes
 
-        self.feat_net = FeatureNet(in_channels=in_channels, classification=True, feature_transform=feature_transform)
+        self.feat_net = FeatureNet(in_channels=in_channels, classification=False, feature_transform=feature_transform)
 
         self.mlp = nn.Sequential(
-            nn.Linear(1024 + 64, 512, bias=False),
+            nn.Conv1d(1024 + 64, 512, 1, bias=False),
             nn.BatchNorm1d(512),
             nn.ReLU(),
 
-            nn.Linear(512, 256, bias=False),
+            nn.Conv1d(512, 256, 1, bias=False),
             nn.BatchNorm1d(256),
             nn.ReLU(),
 
-            nn.Linear(256, 128),
+            nn.Conv1d(256, 128, 1),
             nn.BatchNorm1d(128),
             nn.ReLU(),
         )
 
-        self.out_conv = nn.Linear(128, num_classes)
+        self.out_conv = nn.Conv1d(128, num_classes, 1)
 
     def forward(self, x):
-        x, trans_in, trans_feat = self.feat_net(x)
-        # x: (batch_size, 1024, num_pts); trans_feat: (batch_size, 64, num_pts)
-        x = torch.cat([trans_feat, x], dim=1)
+        x, trans_in, trans_feat = self.feat_net(x)  # x: (batch_size, (64 + 1024), num_pts)
         x = self.mlp(x)
-        logits = self.out_conv(x)  # (batch_size, num_classes)
+        logits = self.out_conv(x)  # (batch_size, num_classes, num_points)
+        logits = logits.permute(0, 2, 1)  # (batch_size, num_points, num_classes)
         return logits, trans_feat
 
 
