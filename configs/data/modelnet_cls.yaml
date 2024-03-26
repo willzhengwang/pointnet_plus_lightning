@@ -1,7 +1,7 @@
 _target_: src.data.modelnet_datamodule.ModelnetDataModule
 data_dir: ${paths.data_dir}/modelnet40_normal_resampled
 batch_size: 16
-classification: True
+num_classes: 10
 augmentation: True
 num_workers: 8
 num_points: 10000
