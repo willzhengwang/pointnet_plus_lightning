@@ -151,7 +151,7 @@ If the hyperparameters are tuned properly, we anticipate that the performance ra
 | Network        | Accuracy | Script                                                                                                            |
 |----------------|----------|-------------------------------------------------------------------------------------------------------------------|
 | PointNet       | 98.2%    | python src\train.py trainer=gpu trainer.max_epochs=60 data=shapenet_cls data.batch_size=32 model=pointnet_cls     |
-| PointNet++ SSG | 98.1%    | python src\train.py trainer=gpu trainer.max_epochs=60 data=shapenet_cls data.batch_size=16 model=pointnet2ssg_cls |
+| PointNet++ SSG | 98.5%    | python src\train.py trainer=gpu trainer.max_epochs=60 data=shapenet_cls data.batch_size=16 model=pointnet2ssg_cls |
 | PointNet++ MSG | tbd %    | python src\train.py trainer=gpu trainer.max_epochs=60 data=shapenet_cls data.batch_size=16 model=pointnet2msg_cls |
 
 ### Classification on Modelnet40 Dataset (coordinates with normals)
