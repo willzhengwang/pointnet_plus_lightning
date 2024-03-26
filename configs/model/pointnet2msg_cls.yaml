@@ -21,7 +21,7 @@ scheduler:
 net:
   _target_: src.models.pointnet2_module.PointNet2MSGCls
   num_classes: 16
-  with_normals: False
+  with_normals: True
 
 # compile model for faster training with pytorch 2.0
 compile: false
