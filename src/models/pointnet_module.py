@@ -210,7 +210,7 @@ class PointNetPartSeg(nn.Module):
             nn.ReLU(),
         )
 
-        self.out_conv = nn.Linear(128, )
+        self.out_conv = nn.Linear(128, num_classes)
 
     def forward(self, x):
         x, trans_in, trans_feat = self.feat_net(x)
