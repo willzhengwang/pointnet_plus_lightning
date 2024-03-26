@@ -156,10 +156,10 @@ If the hyperparameters are tuned properly, we anticipate that the performance ra
 
 ### Classification on Modelnet40 Dataset (coordinates with normals)
 
-| Network        | Accuracy | Script                                                                                                            |
-|----------------|----------|-------------------------------------------------------------------------------------------------------------------|
-| PointNet       | 91.3%    | python src\train.py trainer=gpu trainer.max_epochs=60 data=modelnet_cls data.batch_size=16 model=pointnet_cls     |
-| PointNet++ SSG | tbd %    | python src\train.py trainer=gpu trainer.max_epochs=60 data=modelnet_cls data.batch_size=16 model=pointnet2ssg_cls |
+| Network        | Accuracy  | Script                                                                                                            |
+|----------------|-----------|-------------------------------------------------------------------------------------------------------------------|
+| PointNet       | 91.3%     | python src\train.py trainer=gpu trainer.max_epochs=60 data=modelnet_cls data.batch_size=16 model=pointnet_cls     |
+| PointNet++ SSG | 91.9%     | python src\train.py trainer=gpu trainer.max_epochs=60 data=modelnet_cls data.batch_size=16 model=pointnet2ssg_cls |
 
 ### Part Segmentation on ShapeNet Core Dataset (coordinates with normals)
 
