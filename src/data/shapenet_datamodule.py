@@ -115,12 +115,9 @@ class ShapenetCoreDataset(Dataset):
         """
         _, cat_id, item = self.file_list[idx].split('/')
         pts_file = path.join(self.data_dir, cat_id, item + '.txt')
-        try:
+
+        with open(pts_file, "r") as f:
             points = np.loadtxt(pts_file, dtype=np.float32, delimiter=' ')
-        except BaseException as err:
-            # One file in the shanetcore dataset contains a letter 'p' which crashed np.loadtxt.
-            log.error(f"{str(err)}")
-            raise IOError(f"Failed to load data from the file {pts_file}")
         points[:, 0:3] = pc_normalize(points[:, 0:3])
 
         cls_label = np.array([self.id2cat[cat_id][1]], dtype=np.int64)
