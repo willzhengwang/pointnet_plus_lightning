@@ -116,10 +116,15 @@ class ShapenetCoreDataset(Dataset):
         _, cat_id, item = self.file_list[idx].split('/')
         pts_file = path.join(self.data_dir, cat_id, item + '.txt')
 
-        with open(pts_file, "r") as f:
-            points = np.loadtxt(pts_file, dtype=np.float32, delimiter=' ')
-        points[:, 0:3] = pc_normalize(points[:, 0:3])
+        try:
+            with open(pts_file, "r") as f:
+                points = np.loadtxt(pts_file).astype(np.float32)
+        except BaseException as err:
+            log.info(f"Failed to load data from {pts_file}")
+            log.error(str(err))
+            raise err
 
+        points[:, 0:3] = pc_normalize(points[:, 0:3])
         cls_label = np.array([self.id2cat[cat_id][1]], dtype=np.int64)
         if not self.classification:
             # for segmentation
@@ -144,7 +149,7 @@ class ShapenetCoreDataset(Dataset):
             return torch.from_numpy(points), torch.from_numpy(cls_label.squeeze())
         # for segmentation
         encoded_segments = ','.join(map(str, self.segments[self.id2cat[cat_id][0]]))
-        return torch.from_numpy(points), \
+        return torch.from_numpy(points.astype(np.float32)), \
                torch.from_numpy(seg_labels[choice].squeeze()), \
                encoded_segments
 
